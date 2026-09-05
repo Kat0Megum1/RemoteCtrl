@@ -5,7 +5,7 @@
 #include "framework.h"
 #include "RemoteCtrl.h"
 #include "ServerSocket.h"
-
+#include <direct.h>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -17,6 +17,42 @@
 CWinApp theApp;
 
 using namespace std;
+
+void Dump(BYTE* pData, size_t nSize)
+{
+    std::string strOut;
+    for (size_t i = 0; i < nSize; i++)
+    {
+        char buf[8] = "";
+        if (i > 0 && (i % 16 == 0))strOut += "\n";
+        snprintf(buf, sizeof(buf), "%02X", pData[i] & 0xFF);
+        strOut += buf;
+    }
+    strOut += "\n";
+    OutputDebugStringA(strOut.c_str());
+}
+
+int MakeDriverInfo()
+{
+    std::string result;
+    DWORD driveBit = GetLogicalDrives();
+    for (int i = 0; i < 26; ++i)
+    {
+        if (driveBit & (1UL << i))
+        {
+            if (!result.empty())
+                result += ',';
+            result += 'A' + i;
+        }
+    }
+
+    CPacket packet(1, (BYTE*)result.c_str(), result.size());
+    Dump((BYTE*)packet.Data(), packet.Size());
+
+    CServerSocket::getInstance()->Send(packet);
+
+    return 0;
+}
 
 int main()
 {
@@ -34,9 +70,8 @@ int main()
             nRetCode = 1;
         }
         else
-        {
-            // TODO: 在此处为应用程序的行为编写代码。          
-            CServerSocket* pserver = CServerSocket::getInstance();
+        {         
+            /*CServerSocket* pserver = CServerSocket::getInstance();
             int count = 0;
             if (pserver->InitSocket() == false)
             {
@@ -56,6 +91,13 @@ int main()
                     count++;
                 };
                 int ret = pserver->DealCommand();
+            }*/
+            int nCmd = 1;
+            switch (nCmd)
+            {
+            case 1:
+                MakeDriverInfo();
+                break;
             }
 
         }
