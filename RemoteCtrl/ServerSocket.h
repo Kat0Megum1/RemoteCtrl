@@ -22,8 +22,15 @@ public:
 		serv_addr.sin_family = AF_INET;
 		serv_addr.sin_addr.s_addr = INADDR_ANY;
 		serv_addr.sin_port = htons(8888);
-		if (bind(m_sock, (sockaddr*)&serv_addr, sizeof(serv_addr)) == -1)return false;
-		if (listen(m_sock, 1) == -1)return false;
+		if (bind(m_sock, (sockaddr*)&serv_addr, sizeof(serv_addr)) == -1)
+		{
+			return false;
+		}
+		if (listen(m_sock, 1) == -1)
+		{
+			return false;
+		}
+		return true;
 	}
 
 	bool AcceptClient()
@@ -72,7 +79,7 @@ private:
 		m_client = INVALID_SOCKET;
 		if (InitSockEnv() == FALSE)
 		{
-			MessageBox(NULL, _T("ÎÞ·¨³õÊ¼»¯Ì×½Ó×Ö»·¾³£¬Çë¼ì²éÍøÂçÉèÖÃ£¡"), _T("³õÊ¼»¯´íÎó£¡"), MB_OK | MB_ICONERROR);
+			MessageBox(NULL, _T("ï¿½Þ·ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½×½ï¿½ï¿½Ö»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã£ï¿½"), _T("ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½"), MB_OK | MB_ICONERROR);
 			exit(0);
 		}
 		m_sock= socket(PF_INET, SOCK_STREAM, 0);
