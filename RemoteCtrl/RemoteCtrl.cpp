@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <io.h>
 #include <list>
+#include <atlimage.h>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -251,6 +252,36 @@ int MouseEvent()
 	return 0;
 }
 
+int SendScreen()
+{
+	CImage screen;
+	HDC hScreen = ::GetDC(NULL);
+	int nBitPerPixel = GetDeviceCaps(hScreen, BITSPIXEL);
+	int nWidth = GetDeviceCaps(hScreen, HORZRES);
+	int nHeigth = GetDeviceCaps(hScreen, VERTRES);
+	screen.Create(nWidth, nHeigth, nBitPerPixel);
+	BitBlt(screen.GetDC(), 0, 0, 2560, 1440, hScreen, 0, 0, SRCCOPY);
+	ReleaseDC(NULL, hScreen);
+	HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, 0);
+	IStream* pStream = NULL;
+	HRESULT result = CreateStreamOnHGlobal(hMem, TRUE, &pStream);
+	if (result == S_OK)
+	{
+		screen.Save(pStream, Gdiplus::ImageFormatPNG);
+		LARGE_INTEGER bg = { 0 };
+		pStream->Seek(bg, STREAM_SEEK_SET, NULL);
+		PBYTE pData = (PBYTE)GlobalLock(hMem);
+		SIZE_T nSize = GlobalSize(hMem);
+		CPacket packet(6, pData, nSize);
+		CServerSocket::getInstance()->Send(packet);
+		GlobalUnlock(hMem);
+	}
+	pStream->Release();
+	GlobalFree(hMem);
+	screen.ReleaseDC();
+	return 0;
+}
+
 int main()
 {
 	int nRetCode = 0;
@@ -289,7 +320,7 @@ int main()
 				};
 				int ret = pserver->DealCommand();
 			}*/
-			int nCmd = 1;
+			int nCmd = 6;
 			switch (nCmd)
 			{
 			case 1:
@@ -306,6 +337,9 @@ int main()
 				break;
 			case 5:
 				MouseEvent();
+				break;
+			case 6:
+				SendScreen();
 				break;
 			}
 
