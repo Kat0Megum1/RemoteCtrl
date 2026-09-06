@@ -114,6 +114,48 @@ int MakeDirectoryInfo()
     return 0;
 }
 
+int RunFile()
+{
+    std::string strPath;
+    CServerSocket::getInstance()->GetFilePath(strPath);
+    ShellExecuteA(NULL, NULL, strPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+    return 0;
+}
+
+int DownloadFile()
+{
+    std::string strPath;
+    CServerSocket::getInstance()->GetFilePath(strPath);
+    long long data = 0;
+    FILE* pFile = NULL;
+    errno_t err = fopen_s(&pFile, strPath.c_str(), "rb");
+    if (err!=0)
+    {
+        CPacket packet(4, (BYTE*)&data, 0);
+        CServerSocket::getInstance()->Send(packet);
+        return -1;
+    }
+    if (pFile != NULL) 
+    {
+        fseek(pFile, 0, SEEK_END);
+        data = ftell(pFile);
+        CPacket head(4, (BYTE*)&data, 8);
+        fseek(pFile, 0, SEEK_SET);
+        char buffer[1024] = "";
+        size_t rlen = 0;
+        do
+        {
+            rlen = fread(buffer, 1, 1024, pFile);
+            CPacket packet(4, (BYTE*)buffer, rlen);
+            CServerSocket::getInstance()->Send(packet);
+        } while (rlen >= 1024);
+        fclose(pFile);
+    }
+    CPacket packet(4, NULL, 0);
+    CServerSocket::getInstance()->Send(packet);
+    return 0;
+}
+
 int main()
 {
     int nRetCode = 0;
@@ -161,6 +203,12 @@ int main()
             case 2:
                 MakeDirectoryInfo();
 				break;
+            case 3:
+                RunFile();
+                break;
+            case 4:
+                DownloadFile();
+                break;
             }
 
         }
