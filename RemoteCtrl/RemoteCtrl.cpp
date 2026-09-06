@@ -6,6 +6,9 @@
 #include "RemoteCtrl.h"
 #include "ServerSocket.h"
 #include <direct.h>
+#include <stdio.h>
+#include <io.h>
+#include <list>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -54,6 +57,63 @@ int MakeDriverInfo()
     return 0;
 }
 
+typedef struct file_info
+{
+    file_info()
+    {
+        IsInvalid = FALSE;
+        IsDirectory = FALSE;
+        HasNext = TRUE;
+        memset(szFileName, 0, sizeof(szFileName));
+    }
+    BOOL IsInvalid;
+    BOOL IsDirectory;
+    BOOL HasNext;
+    char szFileName[256];
+}FILEINFO, * PFILEINFO;
+
+int MakeDirectoryInfo()
+{
+    std::string strPath;
+    if (CServerSocket::getInstance()->GetFilePath(strPath) == false)
+    {
+        OutputDebugString(_T("当前的命令，不是获取文件列表，命令解析错误！"));
+        return -1;
+    }
+    if (_chdir(strPath.c_str()) != 0) 
+    {
+        FILEINFO finfo;
+        finfo.IsInvalid = TRUE;
+        finfo.IsDirectory = TRUE;
+        finfo.HasNext = FALSE;
+        memcpy(finfo.szFileName, strPath.c_str(), strPath.size());
+        CPacket packet(2, (BYTE*)&finfo, sizeof(finfo));
+        CServerSocket::getInstance()->Send(packet);
+        OutputDebugString(_T("没有权限，访问目录！"));
+        return -2;
+    }
+    _finddata_t fdata;
+    int hfind = 0;
+    if ((hfind=_findfirst("*", &fdata)) == -1)
+    {
+        OutputDebugString(_T("没有找到任何文件！"));
+        return -3;
+    }
+    do
+    {
+        FILEINFO finfo;
+        finfo.IsDirectory = (fdata.attrib & _A_SUBDIR) != 0;
+        memcpy(finfo.szFileName, fdata.name, sizeof(fdata.name));
+        CPacket packet(2, (BYTE*)&finfo, sizeof(finfo));
+        CServerSocket::getInstance()->Send(packet);
+    } while (!_findnext(hfind, &fdata));
+    FILEINFO finfo;
+    finfo.HasNext = FALSE;
+    CPacket packet(2, (BYTE*)&finfo, sizeof(finfo));
+    CServerSocket::getInstance()->Send(packet);
+    return 0;
+}
+
 int main()
 {
     int nRetCode = 0;
@@ -98,6 +158,9 @@ int main()
             case 1:
                 MakeDriverInfo();
                 break;
+            case 2:
+                MakeDirectoryInfo();
+				break;
             }
 
         }
