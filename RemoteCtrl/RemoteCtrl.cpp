@@ -10,6 +10,7 @@
 #include <io.h>
 #include <list>
 #include <atlimage.h>
+#include "LockDialog.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -282,6 +283,64 @@ int SendScreen()
 	return 0;
 }
 
+CLockDialog dlg;
+unsigned threadid = 0;
+
+unsigned _stdcall threadLockDlg(void* arg)
+{
+	dlg.Create(IDD_DIALOG_INFO, NULL);
+	dlg.ShowWindow(SW_SHOW);
+	CRect rect;
+	rect.left = 0;
+	rect.top = 0;
+	rect.right = GetSystemMetrics(SM_CXFULLSCREEN);
+	rect.bottom = GetSystemMetrics(SM_CYFULLSCREEN);
+	rect.bottom *= 1.03;
+	dlg.MoveWindow(rect);
+	dlg.SetWindowPos(&dlg.wndTopMost, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
+	ShowCursor(false);
+	::ShowWindow(::FindWindow(_T("Shell_TrayWnd"), NULL), SW_HIDE);
+	rect.left = 0;
+	rect.top = 0;
+	rect.right = 1;
+	rect.bottom = 1;
+	MSG msg;
+	while (GetMessage(&msg, NULL, 0, 0))
+	{
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+		if (msg.message == WM_KEYDOWN)
+		{
+			if (msg.wParam == 0x1B)
+				break;
+		}
+	}
+	ShowCursor(true);
+	::ShowWindow(::FindWindow(_T("Shell_TrayWnd"), NULL), SW_SHOW);
+	dlg.DestroyWindow();
+	_endthreadex(0);
+	return 0;
+}
+
+int LockMachine()
+{
+	if ((dlg.m_hWnd == NULL) || (dlg.m_hWnd == INVALID_HANDLE_VALUE))
+	{
+		_beginthreadex(NULL, 0, threadLockDlg, NULL, 0, &threadid);
+	}
+	CPacket packet(7, NULL, 0);
+	CServerSocket::getInstance()->Send(packet);
+	return 0;
+};
+
+int UnlockMachine()
+{
+	PostThreadMessage(threadid, WM_KEYDOWN, 0x1B, 0);
+	CPacket packet(7, NULL, 0);
+	CServerSocket::getInstance()->Send(packet);
+	return 0;
+};
+
 int main()
 {
 	int nRetCode = 0;
@@ -320,7 +379,7 @@ int main()
 				};
 				int ret = pserver->DealCommand();
 			}*/
-			int nCmd = 6;
+			int nCmd = 7;
 			switch (nCmd)
 			{
 			case 1:
@@ -341,6 +400,20 @@ int main()
 			case 6:
 				SendScreen();
 				break;
+			case 7:
+				LockMachine();
+				Sleep(50);
+				LockMachine();
+				break;
+			case 8:
+				UnlockMachine();
+				break;
+			}
+			Sleep(5000);
+			UnlockMachine();
+			while (dlg.m_hWnd != NULL)
+			{
+				Sleep(10);
 			}
 
 		}
