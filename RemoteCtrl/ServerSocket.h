@@ -260,7 +260,7 @@ private:
 		m_client = INVALID_SOCKET;
 		if (InitSockEnv() == FALSE)
 		{
-			MessageBox(NULL, _T("�޷���ʼ���׽��ֻ����������������ã�"), _T("��ʼ������"), MB_OK | MB_ICONERROR);
+			MessageBox(NULL, _T("无法初始化套接字环境，初始化错误！"), _T("初始化失败！"), MB_OK | MB_ICONERROR);
 			exit(0);
 		}
 		m_sock= socket(PF_INET, SOCK_STREAM, 0);
@@ -309,4 +309,3 @@ private:
 };
 
 extern CServerSocket server;
-
