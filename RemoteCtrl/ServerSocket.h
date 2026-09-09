@@ -8,7 +8,7 @@
 class CPacket
 {
 public:
-	CPacket():sHead(0),nLength(0),sCmd(0),sSum(0)
+	CPacket() :sHead(0), nLength(0), sCmd(0), sSum(0)
 	{
 
 	};
@@ -68,7 +68,7 @@ public:
 				break;
 			}
 		}
-		if (i+4+2+2 > nSize)//包数据可能不全，或者包头未能全部接收到
+		if (i + 4 + 2 + 2 > nSize)//包数据可能不全，或者包头未能全部接收到
 		{
 			nSize = 0;
 			return;
@@ -144,7 +144,7 @@ typedef struct MouseEvent
 	WORD nAction;//点击，移动，双击
 	WORD nButton;//左键，右键，中键
 	POINT ptXY;//坐标
-}MOUSEEV,*PMOUSEEV;
+}MOUSEEV, * PMOUSEEV;
 
 class CServerSocket
 {
@@ -160,18 +160,23 @@ public:
 
 	bool InitSocket()
 	{
-		if (m_sock == -1)return false;
+		if (m_sock == INVALID_SOCKET)return false;
+		//允许端口在TIME_WAIT状态下重新绑定，否则调试重启时bind会失败(10048)
+		BOOL bReuse = TRUE;
+		setsockopt(m_sock, SOL_SOCKET, SO_REUSEADDR, (char*)&bReuse, sizeof(bReuse));
 		sockaddr_in serv_addr;
 		memset(&serv_addr, 0, sizeof(serv_addr));
 		serv_addr.sin_family = AF_INET;
 		serv_addr.sin_addr.s_addr = INADDR_ANY;
 		serv_addr.sin_port = htons(8888);
-		if (bind(m_sock, (sockaddr*)&serv_addr, sizeof(serv_addr)) == -1)
+		if (bind(m_sock, (sockaddr*)&serv_addr, sizeof(serv_addr)) == SOCKET_ERROR)
 		{
+			TRACE("bind失败，错误码：%d\r\n", WSAGetLastError());
 			return false;
 		}
-		if (listen(m_sock, 1) == -1)
+		if (listen(m_sock, 1) == SOCKET_ERROR)
 		{
+			TRACE("listen失败，错误码：%d\r\n", WSAGetLastError());
 			return false;
 		}
 		return true;
@@ -181,7 +186,8 @@ public:
 	{
 		sockaddr_in client_addr;
 		int cli_sz = sizeof(client_addr);
-		SOCKET m_client = accept(m_sock, (sockaddr*)&client_addr, &cli_sz);
+		m_client = accept(m_sock, (sockaddr*)&client_addr, &cli_sz);
+		TRACE("m_client =%d\r\n", m_client);
 		if (m_client == -1)return false;
 		return true;
 	}
@@ -190,6 +196,11 @@ public:
 	{
 		if (m_client == -1)return false;
 		char* buffer = new char[BUFFER_SIZE];
+		if (buffer == NULL)
+		{
+			TRACE("内存不足!\r\n");
+			return -2;
+		}
 		memset(buffer, 0, BUFFER_SIZE);
 		size_t index = 0;
 		while (true)
@@ -197,34 +208,39 @@ public:
 			size_t len = recv(m_client, buffer + index, BUFFER_SIZE - index, 0);
 			if (len <= 0)
 			{
+				delete[] buffer;
 				return -1;
 			}
+			TRACE("recv %d\r\n", len);
 			index += len;
 			m_packet = CPacket((BYTE*)buffer, len);
 			if (len > 0)
 			{
 				memmove(buffer, buffer + len, BUFFER_SIZE - len);
 				index -= len;
+				delete[]buffer;
 				return m_packet.sCmd;
 			}
 		}
+		delete[]buffer;
+		return -1;
 	}
 
 	bool Send(const char* pData, int nSize)
 	{
 		if (m_client == -1)return false;
-		return send(m_sock, pData, nSize, 0) > 0;
+		return send(m_client, pData, nSize, 0) > 0;
 	}
 
 	bool Send(CPacket& packet)
 	{
 		if (m_client == -1)return false;
-		return send(m_sock, packet.Data(), packet.Size(), 0);
+		return send(m_client, packet.Data(), packet.Size(), 0);
 	}
 
 	bool GetFilePath(std::string& strPath)
 	{
-		if ((m_packet.sCmd >= 2)&& (m_packet.sCmd <=4))
+		if ((m_packet.sCmd >= 2) && (m_packet.sCmd <= 4))
 		{
 			strPath = m_packet.strData;
 			return true;
@@ -232,7 +248,7 @@ public:
 		return false;
 	}
 
-	bool GetMouseEvent(MOUSEEV&mouse)
+	bool GetMouseEvent(MOUSEEV& mouse)
 	{
 		if (m_packet.sCmd == 5)
 		{
@@ -241,6 +257,18 @@ public:
 		}
 		return false;
 	}
+
+	CPacket& GetPacket()
+	{
+		return m_packet;
+	}
+
+	void CloseClient()
+	{
+		closesocket(m_client);
+		m_client = INVALID_SOCKET;
+	}
+
 private:
 	SOCKET m_sock;
 	SOCKET m_client;
@@ -248,24 +276,26 @@ private:
 
 	CServerSocket& operator=(const CServerSocket&)
 	{
-		
+
 	};
-	CServerSocket(const CServerSocket&ss)
+	CServerSocket(const CServerSocket& ss)
 	{
 		m_sock = ss.m_sock;
 		m_client = ss.m_client;
 	};
-	CServerSocket() 
+	CServerSocket()
 	{
 		m_client = INVALID_SOCKET;
 		if (InitSockEnv() == FALSE)
 		{
-			MessageBox(NULL, _T("无法初始化套接字环境，初始化错误！"), _T("初始化失败！"), MB_OK | MB_ICONERROR);
+			MessageBox(NULL,
+				_T("无法初始化套接字环境，初始化错误!"),
+				_T("初始化失败!"), MB_OK | MB_ICONERROR);
 			exit(0);
 		}
-		m_sock= socket(PF_INET, SOCK_STREAM, 0);
+		m_sock = socket(PF_INET, SOCK_STREAM, 0);
 	};
-	~CServerSocket() 
+	~CServerSocket()
 	{
 		closesocket(m_sock);
 		WSACleanup();

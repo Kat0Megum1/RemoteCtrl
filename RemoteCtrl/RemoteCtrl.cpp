@@ -1,4 +1,4 @@
-﻿// RemoteCtrl.cpp : 此文件包含 "main" 函数。程序执行将在此处开始并结束。
+﻿﻿﻿﻿// RemoteCtrl.cpp : 此文件包含 "main" 函数。程序执行将在此处开始并结束。
 //
 
 #include "pch.h"
@@ -341,6 +341,50 @@ int UnlockMachine()
 	return 0;
 };
 
+int TestConnect()
+{
+	CPacket packet(1981, NULL, 0);
+	bool ret = CServerSocket::getInstance()->Send(packet);
+	TRACE("Send ret=%d \r\n", ret);
+	return 0;
+}
+
+int ExcuteCommand(int nCmd)
+{
+	int ret = 0;
+	switch (nCmd)
+	{
+	case 1:
+		ret = MakeDriverInfo();
+		break;
+	case 2:
+		ret = MakeDirectoryInfo();
+		break;
+	case 3:
+		ret = RunFile();
+		break;
+	case 4:
+		ret = DownloadFile();
+		break;
+	case 5:
+		ret = MouseEvent();
+		break;
+	case 6:
+		ret = SendScreen();
+		break;
+	case 7:
+		ret = LockMachine();
+		break;
+	case 8:
+		ret = UnlockMachine();
+		break;
+	case 1981:
+		ret = TestConnect();
+		break;
+	}
+	return 0;
+}
+
 int main()
 {
 	int nRetCode = 0;
@@ -358,14 +402,14 @@ int main()
 		}
 		else
 		{
-			/*CServerSocket* pserver = CServerSocket::getInstance();
+			CServerSocket* pserver = CServerSocket::getInstance();
 			int count = 0;
 			if (pserver->InitSocket() == false)
 			{
 				MessageBox(NULL, _T("网络初始化异常，未能初始化成功，请检查网络状态！"), _T("网络初始化失败！"), MB_OK | MB_ICONERROR);
 				exit(0);
 			}
-			while (CServerSocket::getInstance()!=NULL)
+			while (CServerSocket::getInstance() != NULL)
 			{
 				if (pserver->AcceptClient() == false)
 				{
@@ -377,45 +421,20 @@ int main()
 					MessageBox(NULL, _T("无法正常接入用户，自动重试！"), _T("接入用户失败！"), MB_OK | MB_ICONERROR);
 					count++;
 				};
+				TRACE("AcceptClient return true\r\n");
 				int ret = pserver->DealCommand();
-			}*/
-			int nCmd = 7;
-			switch (nCmd)
-			{
-			case 1:
-				MakeDriverInfo();
-				break;
-			case 2:
-				MakeDirectoryInfo();
-				break;
-			case 3:
-				RunFile();
-				break;
-			case 4:
-				DownloadFile();
-				break;
-			case 5:
-				MouseEvent();
-				break;
-			case 6:
-				SendScreen();
-				break;
-			case 7:
-				LockMachine();
-				Sleep(50);
-				LockMachine();
-				break;
-			case 8:
-				UnlockMachine();
-				break;
-			}
-			Sleep(5000);
-			UnlockMachine();
-			while (dlg.m_hWnd != NULL)
-			{
-				Sleep(10);
-			}
+				TRACE("DealCommand ret %d\r\n", ret);
+				if (ret > 0)
+				{
+					ret = ExcuteCommand(ret);
+					if (ret != 0)
+					{
+						TRACE("执行命令失败：%d ret=%d\r\n", pserver->GetPacket().sCmd, ret);
+					}
+				}
 
+				pserver->CloseClient();
+			}
 		}
 	}
 	else

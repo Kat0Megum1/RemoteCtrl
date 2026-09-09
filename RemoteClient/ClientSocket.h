@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "framework.h"
 #include <string>
+#include <vector>
 
 #pragma pack(push)
 #pragma pack(1)
@@ -69,14 +70,14 @@ public:
 				break;
 			}
 		}
-		if (i + 4 + 2 + 2 > nSize)//°üÊı¾İ¿ÉÄÜ²»È«£¬»òÕß°üÍ·Î´ÄÜÈ«²¿½ÓÊÕµ½
+		if (i + 4 + 2 + 2 > nSize)//ï¿½ï¿½ï¿½ï¿½ï¿½İ¿ï¿½ï¿½Ü²ï¿½È«ï¿½ï¿½ï¿½ï¿½ï¿½ß°ï¿½Í·Î´ï¿½ï¿½È«ï¿½ï¿½ï¿½ï¿½ï¿½Õµï¿½
 		{
 			nSize = 0;
 			return;
 		}
 
 		nLength = *(DWORD*)(pData + i); i += 4;
-		if (nLength + i > nSize)//°üÎ´ÍêÈ«½ÓÊÕµ½£¬¾Í·µ»Ø£¬½âÎöÊ§°Ü
+		if (nLength + i > nSize)//ï¿½ï¿½Î´ï¿½ï¿½È«ï¿½ï¿½ï¿½Õµï¿½ï¿½ï¿½ï¿½Í·ï¿½ï¿½Ø£ï¿½ï¿½ï¿½ï¿½ï¿½Ê§ï¿½ï¿½
 		{
 			nSize = 0;
 			return;
@@ -124,11 +125,11 @@ public:
 
 	};
 public:
-	WORD sHead;//°üÍ·
-	DWORD nLength;//³¤¶È
-	WORD sCmd;//ÃüÁî
-	std::string strData;//Êı¾İ
-	WORD sSum;//ºÍĞ£Ñé
+	WORD sHead;//ï¿½ï¿½Í·
+	DWORD nLength;//ï¿½ï¿½ï¿½ï¿½
+	WORD sCmd;//ï¿½ï¿½ï¿½ï¿½
+	std::string strData;//ï¿½ï¿½ï¿½ï¿½
+	WORD sSum;//ï¿½ï¿½Ğ£ï¿½ï¿½
 	std::string strOut;
 };
 #pragma pack(pop)
@@ -142,28 +143,12 @@ typedef struct MouseEvent
 		ptXY.x = 0;
 		ptXY.y = 0;
 	}
-	WORD nAction;//µã»÷£¬ÒÆ¶¯£¬Ë«»÷
-	WORD nButton;//×ó¼ü£¬ÓÒ¼ü£¬ÖĞ¼ü
-	POINT ptXY;//×ø±ê
+	WORD nAction;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½ï¿½Ë«ï¿½ï¿½
+	WORD nButton;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò¼ï¿½ï¿½ï¿½ï¿½Ğ¼ï¿½
+	POINT ptXY;//ï¿½ï¿½ï¿½ï¿½
 }MOUSEEV, * PMOUSEEV;
 
-std::string GetErrorInfo(int wsaErrCode)
-{
-	std::string ret;
-	LPVOID lpMsgBuf;
-	FormatMessage(
-		FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER,
-		NULL,
-		wsaErrCode,
-		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-		(LPTSTR)&lpMsgBuf,
-		0,
-		NULL
-	);
-	ret = (char*)lpMsgBuf;
-	LocalFree(lpMsgBuf);
-	return ret;
-}
+std::string GetErrorInfo(int wsaErrCode);
 
 class CClientSocket
 {
@@ -179,7 +164,9 @@ public:
 
 	bool InitSocket(const std::string& strIPAddress)
 	{
-		if (m_sock == -1)return false;
+		if (m_sock != INVALID_SOCKET) CloseSocket();
+		m_sock = socket(PF_INET, SOCK_STREAM, 0);
+		if (m_sock == INVALID_SOCKET) return false;
 		sockaddr_in serv_addr;
 		memset(&serv_addr, 0, sizeof(serv_addr));
 		serv_addr.sin_family = AF_INET;
@@ -187,14 +174,16 @@ public:
 		serv_addr.sin_port = htons(8888);
 		if (serv_addr.sin_addr.s_addr == INADDR_NONE)
 		{
-			AfxMessageBox("Ö¸¶¨µÄIPµØÖ·²»´æÔÚ£¡");
+			AfxMessageBox("Ö¸æŒ‡å®šçš„IPåœ°å€ä¸å­˜åœ¨!");
 			return false;
 		}
 		int result = connect(m_sock, (sockaddr*)&serv_addr, sizeof(serv_addr));
-		if (result == -1)
+		if (result == SOCKET_ERROR)
 		{
-			AfxMessageBox("Á¬½ÓÊ§°Ü£¡");
-			TRACE("Á¬½ÓÊ§°Ü£º%d %s\r\n", WSAGetLastError(), GetErrorInfo(WSAGetLastError()).c_str());
+			int nErr = WSAGetLastError();
+			AfxMessageBox("è¿æ¥å¤±è´¥!");
+			TRACE("è¿æ¥å¤±è´¥:%d %s\r\n", nErr, GetErrorInfo(nErr).c_str());
+			return false;
 		}
 		return true;
 	}
@@ -211,7 +200,7 @@ public:
 	int DealCommand()
 	{
 		if (m_sock == -1)return false;
-		char* buffer = new char[BUFFER_SIZE];
+		char* buffer = m_buffer.data();
 		memset(buffer, 0, BUFFER_SIZE);
 		size_t index = 0;
 		while (true)
@@ -263,9 +252,21 @@ public:
 		}
 		return false;
 	}
+
+	CPacket& GetPacket()
+	{
+		return m_packet;
+	}
+
+	void CloseSocket()
+	{
+		closesocket(m_sock);
+		m_sock = INVALID_SOCKET;
+	}
 private:
 	SOCKET m_sock;
 	CPacket m_packet;
+	std::vector<char>m_buffer;
 
 	CClientSocket& operator=(const CClientSocket&)
 	{
@@ -279,10 +280,12 @@ private:
 	{
 		if (InitSockEnv() == FALSE)
 		{
-			MessageBox(NULL, _T("ÎŞ·¨³õÊ¼»¯Ì×½Ó×Ö»·¾³£¬³õÊ¼»¯´íÎó£¡"), _T("³õÊ¼»¯Ê§°Ü£¡"), MB_OK | MB_ICONERROR);
+			MessageBox(NULL,
+				_T("æ— æ³•åˆå§‹åŒ–å¥—æ¥å­—ç¯å¢ƒï¼Œåˆå§‹åŒ–é”™è¯¯!"),
+				_T("åˆå§‹åŒ–å¤±è´¥!"), MB_OK | MB_ICONERROR);
 			exit(0);
 		}
-		m_sock = socket(PF_INET, SOCK_STREAM, 0);
+		m_buffer.resize(BUFFER_SIZE);
 	};
 	~CClientSocket()
 	{
