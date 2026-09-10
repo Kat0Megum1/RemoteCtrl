@@ -162,7 +162,7 @@ public:
 		return m_instance;
 	}
 
-	bool InitSocket(const std::string& strIPAddress)
+	bool InitSocket(int nIP,int nPort)
 	{
 		if (m_sock != INVALID_SOCKET) CloseSocket();
 		m_sock = socket(PF_INET, SOCK_STREAM, 0);
@@ -170,8 +170,8 @@ public:
 		sockaddr_in serv_addr;
 		memset(&serv_addr, 0, sizeof(serv_addr));
 		serv_addr.sin_family = AF_INET;
-		serv_addr.sin_addr.s_addr = inet_addr(strIPAddress.c_str());
-		serv_addr.sin_port = htons(8888);
+		serv_addr.sin_addr.s_addr = htonl(nIP);
+		serv_addr.sin_port = htons(nPort);
 		if (serv_addr.sin_addr.s_addr == INADDR_NONE)
 		{
 			AfxMessageBox("ָ指定的IP地址不存在!");
