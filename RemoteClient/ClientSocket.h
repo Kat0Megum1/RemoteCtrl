@@ -214,25 +214,34 @@ public:
 #define BUFFER_SIZE 4096
 	int DealCommand()
 	{
-		if (m_sock == -1)return false;
+		if (m_sock == INVALID_SOCKET)return -1;
 		char* buffer = m_buffer.data();
-		memset(buffer, 0, BUFFER_SIZE);
-		size_t index = 0;
 		while (true)
 		{
-			size_t len = recv(m_sock, buffer + index, BUFFER_SIZE - index, 0);
+			//先尝试从缓冲区已有数据解析一个完整包
+			//成功时 parseSize 为消耗的字节数；为 0 表示包不完整/校验失败
+			size_t parseSize = m_bufLen;
+			CPacket packet((BYTE*)buffer, parseSize);
+			if (parseSize > 0)
+			{
+				m_packet = packet;
+				//移走已消费的字节，剩余的（同一次 recv 粘来的后续包）留下次解析
+				m_bufLen -= parseSize;
+				memmove(buffer, buffer + parseSize, m_bufLen);
+				return m_packet.sCmd;
+			}
+			//包不完整，继续 recv 追加到缓冲区末尾
+			if (m_bufLen >= BUFFER_SIZE)
+			{
+				m_bufLen = 0;//缓冲满仍解析不出，丢弃脏数据避免死循环
+				return -1;
+			}
+			int len = recv(m_sock, buffer + m_bufLen, (int)(BUFFER_SIZE - m_bufLen), 0);
 			if (len <= 0)
 			{
 				return -1;
 			}
-			index += len;
-			m_packet = CPacket((BYTE*)buffer, len);
-			if (len > 0)
-			{
-				memmove(buffer, buffer + len, BUFFER_SIZE - len);
-				index -= len;
-				return m_packet.sCmd;
-			}
+			m_bufLen += len;
 		}
 	}
 
@@ -277,11 +286,13 @@ public:
 	{
 		closesocket(m_sock);
 		m_sock = INVALID_SOCKET;
+		m_bufLen = 0;
 	}
 private:
 	SOCKET m_sock;
 	CPacket m_packet;
 	std::vector<char>m_buffer;
+	size_t m_bufLen = 0;//缓冲区中尚未解析的有效字节数
 
 	CClientSocket& operator=(const CClientSocket&)
 	{
