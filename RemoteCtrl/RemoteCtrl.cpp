@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿// RemoteCtrl.cpp : 此文件包含 "main" 函数。程序执行将在此处开始并结束。
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// RemoteCtrl.cpp : 此文件包含 "main" 函数。程序执行将在此处开始并结束。
 //
 
 #include "pch.h"
@@ -59,21 +59,6 @@ int MakeDriverInfo()
 	return 0;
 }
 
-typedef struct file_info
-{
-	file_info()
-	{
-		IsInvalid = FALSE;
-		IsDirectory = FALSE;
-		HasNext = TRUE;
-		memset(szFileName, 0, sizeof(szFileName));
-	}
-	BOOL IsInvalid;
-	BOOL IsDirectory;
-	BOOL HasNext;
-	char szFileName[256];
-}FILEINFO, * PFILEINFO;
-
 int MakeDirectoryInfo()
 {
 	std::string strPath;
@@ -85,27 +70,28 @@ int MakeDirectoryInfo()
 	if (_chdir(strPath.c_str()) != 0)
 	{
 		FILEINFO finfo;
-		finfo.IsInvalid = TRUE;
-		finfo.IsDirectory = TRUE;
 		finfo.HasNext = FALSE;
-		memcpy(finfo.szFileName, strPath.c_str(), strPath.size());
 		CPacket packet(2, (BYTE*)&finfo, sizeof(finfo));
 		CServerSocket::getInstance()->Send(packet);
 		OutputDebugString(_T("没有权限，访问目录！"));
 		return -2;
 	}
 	_finddata_t fdata;
-	int hfind = 0;
+	intptr_t hfind = 0;
 	if ((hfind = _findfirst("*", &fdata)) == -1)
 	{
 		OutputDebugString(_T("没有找到任何文件！"));
+		FILEINFO finfo;
+		finfo.HasNext = FALSE;
+		CPacket packet(2, (BYTE*)&finfo, sizeof(finfo));
+		CServerSocket::getInstance()->Send(packet);
 		return -3;
 	}
 	do
 	{
 		FILEINFO finfo;
 		finfo.IsDirectory = (fdata.attrib & _A_SUBDIR) != 0;
-		memcpy(finfo.szFileName, fdata.name, sizeof(fdata.name));
+		memcpy(finfo.szFileName, fdata.name, strlen(fdata.name));
 		CPacket packet(2, (BYTE*)&finfo, sizeof(finfo));
 		CServerSocket::getInstance()->Send(packet);
 	} while (!_findnext(hfind, &fdata));
@@ -295,7 +281,7 @@ unsigned _stdcall threadLockDlg(void* arg)
 	rect.top = 0;
 	rect.right = GetSystemMetrics(SM_CXFULLSCREEN);
 	rect.bottom = GetSystemMetrics(SM_CYFULLSCREEN);
-	rect.bottom *= 1.03;
+	rect.bottom *= LONG(rect.bottom * 1.03);
 	dlg.MoveWindow(rect);
 	dlg.SetWindowPos(&dlg.wndTopMost, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
 	ShowCursor(false);
