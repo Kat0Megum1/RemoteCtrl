@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// RemoteCtrl.cpp : 此文件包含 "main" 函数。程序执行将在此处开始并结束。
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// RemoteCtrl.cpp : 此文件包含 "main" 函数。程序执行将在此处开始并结束。
 //
 
 #include "pch.h"
@@ -128,6 +128,7 @@ int DownloadFile()
 		fseek(pFile, 0, SEEK_END);
 		data = ftell(pFile);
 		CPacket head(4, (BYTE*)&data, 8);
+		CServerSocket::getInstance()->Send(head);
 		fseek(pFile, 0, SEEK_SET);
 		char buffer[1024] = "";
 		size_t rlen = 0;
@@ -322,7 +323,7 @@ int LockMachine()
 int UnlockMachine()
 {
 	PostThreadMessage(threadid, WM_KEYDOWN, 0x1B, 0);
-	CPacket packet(7, NULL, 0);
+	CPacket packet(8, NULL, 0);
 	CServerSocket::getInstance()->Send(packet);
 	return 0;
 };
