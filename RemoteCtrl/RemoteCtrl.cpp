@@ -107,6 +107,8 @@ int RunFile()
 	std::string strPath;
 	CServerSocket::getInstance()->GetFilePath(strPath);
 	ShellExecuteA(NULL, NULL, strPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+	CPacket packet(3, NULL, 0);
+	CServerSocket::getInstance()->Send(packet);
 	return 0;
 }
 
@@ -328,6 +330,17 @@ int UnlockMachine()
 	return 0;
 };
 
+int DeleteLocalFile()
+{
+	std::string strPath;
+	CServerSocket::getInstance()->GetFilePath(strPath);
+	DeleteFile(strPath.c_str());
+	CPacket packet(9, NULL, 0);
+	bool ret = CServerSocket::getInstance()->Send(packet);
+	TRACE("Send ret=%d \r\n", ret);
+	return 0;
+}
+
 int TestConnect()
 {
 	CPacket packet(1981, NULL, 0);
@@ -364,6 +377,9 @@ int ExcuteCommand(int nCmd)
 		break;
 	case 8:
 		ret = UnlockMachine();
+		break;
+	case 9:
+		ret = DeleteLocalFile();
 		break;
 	case 1981:
 		ret = TestConnect();

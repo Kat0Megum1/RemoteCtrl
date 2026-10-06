@@ -3,6 +3,10 @@
 //
 
 #pragma once
+#include "ClientSocket.h"
+#include "StatusDlg.h"
+
+#define WM_SEND_PACKET (WM_USER+1)
 
 
 // CRemoteClientDlg 对话框
@@ -22,6 +26,14 @@ protected:
 
 
 private:
+	CImage m_image;
+	bool m_isFull; 
+private:
+	static void threadEntryForWatchData(void* arg);
+	void threadWatchData();
+	static void threadEntryForDownloadFile(void* arg);
+	void threadDownFile();
+	void LoadFileCurrent();
 	void LoadFileInfo();
 	CString GetPath(HTREEITEM hTree);
 	void DeleteTreeChildrenItem(HTREEITEM hTree);
@@ -29,12 +41,19 @@ private:
 	//2 查看指定目录下的文件
 	//3 打开文件
 	//4 下载文件
+	//9 删除文件
+	//5 鼠标操作
+	//6 发送屏幕内容
+	//7 锁机
+	//8 解锁
+	//1981 测试连接
 	//返回值是命令号，如果小于0则是错误
 	int SendCommandPacket(int nCmd, bool bAutoClose = TRUE, BYTE* pData = NULL, size_t nLength = 0);
 
 	// 实现
 protected:
 	HICON m_hIcon;
+	CStatusDlg m_dlgStatus;
 
 	// 生成的消息映射函数
 	virtual BOOL OnInitDialog();
@@ -58,4 +77,5 @@ public:
 	afx_msg void OnDownloadFile();
 	afx_msg void OnDeleteFile();
 	afx_msg void OnRunFile();
+	afx_msg LRESULT OnSendPacket(WPARAM wParam, LPARAM lParam);
 };
