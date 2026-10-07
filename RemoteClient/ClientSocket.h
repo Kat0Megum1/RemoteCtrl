@@ -211,7 +211,7 @@ public:
 		if (m_client == -1)return false;
 		return true;
 	}
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 4096000
 	int DealCommand()
 	{
 		if (m_sock == INVALID_SOCKET)return -1;

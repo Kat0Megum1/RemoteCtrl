@@ -24,7 +24,19 @@ public:
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV 支持
 
-
+public:
+	bool isFull()const
+	{
+		return m_isFull;
+	}
+	CImage& getImage()
+	{
+		return m_image;
+	}
+	void SetImageStatus(bool isFull = false)
+	{
+		m_isFull = isFull;
+	}
 private:
 	CImage m_image;
 	bool m_isFull; 
@@ -78,4 +90,6 @@ public:
 	afx_msg void OnDeleteFile();
 	afx_msg void OnRunFile();
 	afx_msg LRESULT OnSendPacket(WPARAM wParam, LPARAM lParam);
+	afx_msg void OnBnClickedBtnStartWatch();
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 };
