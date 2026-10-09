@@ -272,7 +272,6 @@ void CRemoteClientDlg::threadWatchData()
 	do {
 		pClient = CClientSocket::getInstance();
 	} while (pClient == NULL);
-	ULONGLONG tick = GetTickCount64();
 	for (;;)
 	{
 		if (m_isFull == false)
@@ -564,7 +563,14 @@ LRESULT CRemoteClientDlg::OnSendPacket(WPARAM wParam, LPARAM lParam)
 		ret = SendCommandPacket(cmd, wParam & 1, (BYTE*)(LPCSTR)strFile, strFile.GetLength());
 	}
 	break;
+	case 5:
+	{
+		ret = SendCommandPacket(cmd, wParam & 1, (BYTE*)lParam, sizeof(MOUSEEV));
+	}
+	break;
 	case 6:
+	case 7:
+	case 8:
 	{
 		ret = SendCommandPacket(cmd, wParam & 1);
 	}
