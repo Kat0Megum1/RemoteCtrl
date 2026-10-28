@@ -21,7 +21,7 @@ CCommand::CCommand() :threadid(0)
 		{1981, &CCommand::TestConnect},
 		{-1,NULL}
 	};
-	for (int i = 0; data[i].nCmd != 0; i++)
+	for (int i = 0; data[i].nCmd != -1; i++)
 	{
 		m_mapFunction.insert(std::make_pair(data[i].nCmd, data[i].func));
 	}
@@ -31,13 +31,13 @@ CCommand::~CCommand()
 {
 }
 
-int CCommand::ExcuteCommand(int nCmd)
+int CCommand::ExcuteCommand(int nCmd, std::list<CPacket>& lstPacket, CPacket& inPacket)
 {
 	auto it = m_mapFunction.find(nCmd);
 	if (it == m_mapFunction.end())
 	{
 		return -1;
 	}
-	return (this->*it->second)();
+	return (this->*it->second)(lstPacket, inPacket);
 }
 

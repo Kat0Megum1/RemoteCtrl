@@ -1,5 +1,5 @@
 
-// RemoteClientDlg.cpp: ÊµÏÖÎÄ¼ş
+// RemoteClientDlg.cpp: Êµï¿½ï¿½ï¿½Ä¼ï¿½
 //
 
 #include "pch.h"
@@ -7,29 +7,28 @@
 #include "RemoteClient.h"
 #include "RemoteClientDlg.h"
 #include "afxdialogex.h"
+#include "CWatchDialog.h"
+#include "ClientController.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
-#include "CWatchDialog.h"
 
 
-// ÓÃÓÚÓ¦ÓÃ³ÌĞò¡°¹ØÓÚ¡±²Ëµ¥ÏîµÄ CAboutDlg ¶Ô»°¿ò
+
 
 class CAboutDlg : public CDialogEx
 {
 public:
 	CAboutDlg();
 
-	// ¶Ô»°¿òÊı¾İ
 #ifdef AFX_DESIGN_TIME
 	enum { IDD = IDD_ABOUTBOX };
 #endif
 
 protected:
-	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV Ö§³Ö
+	virtual void DoDataExchange(CDataExchange* pDX); 
 
-	// ÊµÏÖ
 protected:
 	DECLARE_MESSAGE_MAP()
 };
@@ -47,14 +46,12 @@ BEGIN_MESSAGE_MAP(CAboutDlg, CDialogEx)
 END_MESSAGE_MAP()
 
 
-// CRemoteClientDlg ¶Ô»°¿ò
-
-
 
 CRemoteClientDlg::CRemoteClientDlg(CWnd* pParent /*=nullptr*/)
 	: CDialogEx(IDD_REMOTECLIENT_DIALOG, pParent)
 	, m_server_address(0)
 	, m_nPort(_T(""))
+	, m_bDirLoading(false)
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
@@ -68,28 +65,6 @@ void CRemoteClientDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_LIST_FILE, m_List);
 }
 
-int CRemoteClientDlg::SendCommandPacket(int nCmd, bool bAutoClose, BYTE* pData, size_t nLength)
-{
-	UpdateData();
-	CClientSocket* pClient = CClientSocket::getInstance();
-	bool ret = pClient->InitSocket(m_server_address, atoi((LPCTSTR)m_nPort));
-	if (!ret)
-	{
-		AfxMessageBox("ÍøÂç³õÊ¼»¯Ê§°Ü£¡");
-		return -1;
-	}
-	CPacket packet(nCmd, pData, nLength);
-	ret = pClient->Send(packet);
-	TRACE("Send ret %d\r\n", ret);
-	int cmd = pClient->DealCommand();
-	TRACE("ack:%d\r\n", cmd);
-	if (bAutoClose == TRUE)
-	{
-		pClient->CloseSocket();
-	}
-	return cmd;
-}
-
 BEGIN_MESSAGE_MAP(CRemoteClientDlg, CDialogEx)
 	ON_WM_SYSCOMMAND()
 	ON_WM_PAINT()
@@ -101,25 +76,27 @@ BEGIN_MESSAGE_MAP(CRemoteClientDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BUTTON_FILEINFO, &CRemoteClientDlg::OnBnClickedButtonFileinfo)
 	ON_NOTIFY(NM_DBLCLK, IDC_TREE_DIR, &CRemoteClientDlg::OnNMDblclkTreeDir)
 	ON_NOTIFY(NM_CLICK, IDC_TREE_DIR, &CRemoteClientDlg::OnNMClickTreeDir)
+	ON_NOTIFY(TVN_ITEMEXPANDING, IDC_TREE_DIR, &CRemoteClientDlg::OnTvnItemexpandingTreeDir)
 	ON_NOTIFY(NM_RCLICK, IDC_LIST_FILE, &CRemoteClientDlg::OnNMRClickListFile)
 	ON_COMMAND(ID_DOWNLOAD_FILE, &CRemoteClientDlg::OnDownloadFile)
 	ON_COMMAND(ID_DELETE_FILE, &CRemoteClientDlg::OnDeleteFile)
 	ON_COMMAND(ID_RUN_FILE, &CRemoteClientDlg::OnRunFile)
 	ON_MESSAGE(WM_SEND_PACKET, &CRemoteClientDlg::OnSendPacket)
+	ON_MESSAGE(WM_SEND_PACK_ACK, &CRemoteClientDlg::OnSendPackAck)
 	ON_BN_CLICKED(IDC_BTN_START_WATCH, &CRemoteClientDlg::OnBnClickedBtnStartWatch)
 	ON_WM_TIMER()
 END_MESSAGE_MAP()
 
 
-// CRemoteClientDlg ÏûÏ¢´¦Àí³ÌĞò
+// CRemoteClientDlg ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 BOOL CRemoteClientDlg::OnInitDialog()
 {
 	CDialogEx::OnInitDialog();
 
-	// ½«¡°¹ØÓÚ...¡±²Ëµ¥ÏîÌí¼Óµ½ÏµÍ³²Ëµ¥ÖĞ¡£
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½...ï¿½ï¿½ï¿½Ëµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Óµï¿½ÏµÍ³ï¿½Ëµï¿½ï¿½Ğ¡ï¿½
 
-	// IDM_ABOUTBOX ±ØĞëÔÚÏµÍ³ÃüÁî·¶Î§ÄÚ¡£
+	// IDM_ABOUTBOX ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÏµÍ³ï¿½ï¿½ï¿½î·¶Î§ï¿½Ú¡ï¿½
 	ASSERT((IDM_ABOUTBOX & 0xFFF0) == IDM_ABOUTBOX);
 	ASSERT(IDM_ABOUTBOX < 0xF000);
 
@@ -137,20 +114,18 @@ BOOL CRemoteClientDlg::OnInitDialog()
 		}
 	}
 
-	// ÉèÖÃ´Ë¶Ô»°¿òµÄÍ¼±ê¡£  µ±Ó¦ÓÃ³ÌĞòÖ÷´°¿Ú²»ÊÇ¶Ô»°¿òÊ±£¬¿ò¼Ü½«×Ô¶¯
-	//  Ö´ĞĞ´Ë²Ù×÷
-	SetIcon(m_hIcon, TRUE);			// ÉèÖÃ´óÍ¼±ê
-	SetIcon(m_hIcon, FALSE);		// ÉèÖÃĞ¡Í¼±ê
+	// ï¿½ï¿½ï¿½Ã´Ë¶Ô»ï¿½ï¿½ï¿½ï¿½Í¼ï¿½ê¡£  ï¿½ï¿½Ó¦ï¿½Ã³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú²ï¿½ï¿½Ç¶Ô»ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½Ü½ï¿½ï¿½Ô¶ï¿½
+	//  Ö´ï¿½Ğ´Ë²ï¿½ï¿½ï¿½
+	SetIcon(m_hIcon, TRUE);			// ï¿½ï¿½ï¿½Ã´ï¿½Í¼ï¿½ï¿½
+	SetIcon(m_hIcon, FALSE);		// ï¿½ï¿½ï¿½ï¿½Ğ¡Í¼ï¿½ï¿½
 
-	// TODO: ÔÚ´ËÌí¼Ó¶îÍâµÄ³õÊ¼»¯´úÂë
+	// TODO: ï¿½Ú´ï¿½ï¿½ï¿½ï¿½Ó¶ï¿½ï¿½ï¿½Ä³ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	UpdateData();
 	m_server_address = 0x7F000001;
 	m_nPort = _T("8888");
 	UpdateData(FALSE);
-	m_dlgStatus.Create(IDD_DLG_STATUS, this);
-	m_dlgStatus.ShowWindow(SW_HIDE);
-	m_isFull = false;
-	return TRUE;  // ³ı·Ç½«½¹µãÉèÖÃµ½¿Ø¼ş£¬·ñÔò·µ»Ø TRUE
+	// ×´Ì¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ CClientController::InitController ï¿½ï¿½ï¿½ï¿½
+	return TRUE;  // ï¿½ï¿½ï¿½Ç½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ãµï¿½ï¿½Ø¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ò·µ»ï¿½ TRUE
 }
 
 void CRemoteClientDlg::OnSysCommand(UINT nID, LPARAM lParam)
@@ -166,19 +141,19 @@ void CRemoteClientDlg::OnSysCommand(UINT nID, LPARAM lParam)
 	}
 }
 
-// Èç¹ûÏò¶Ô»°¿òÌí¼Ó×îĞ¡»¯°´Å¥£¬ÔòĞèÒªÏÂÃæµÄ´úÂë
-//  À´»æÖÆ¸ÃÍ¼±ê¡£  ¶ÔÓÚÊ¹ÓÃÎÄµµ/ÊÓÍ¼Ä£ĞÍµÄ MFC Ó¦ÓÃ³ÌĞò£¬
-//  Õâ½«ÓÉ¿ò¼Ü×Ô¶¯Íê³É¡£
+// ï¿½ï¿½ï¿½ï¿½ï¿½Ô»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¡ï¿½ï¿½ï¿½ï¿½Å¥ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½Ä´ï¿½ï¿½ï¿½
+//  ï¿½ï¿½ï¿½ï¿½ï¿½Æ¸ï¿½Í¼ï¿½ê¡£  ï¿½ï¿½ï¿½ï¿½Ê¹ï¿½ï¿½ï¿½Äµï¿½/ï¿½ï¿½Í¼Ä£ï¿½Íµï¿½ MFC Ó¦ï¿½Ã³ï¿½ï¿½ï¿½
+//  ï¿½â½«ï¿½É¿ï¿½ï¿½ï¿½Ô¶ï¿½ï¿½ï¿½É¡ï¿½
 
 void CRemoteClientDlg::OnPaint()
 {
 	if (IsIconic())
 	{
-		CPaintDC dc(this); // ÓÃÓÚ»æÖÆµÄÉè±¸ÉÏÏÂÎÄ
+		CPaintDC dc(this); // ï¿½ï¿½ï¿½Ú»ï¿½ï¿½Æµï¿½ï¿½è±¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 		SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
 
-		// Ê¹Í¼±êÔÚ¹¤×÷Çø¾ØĞÎÖĞ¾ÓÖĞ
+		// Ê¹Í¼ï¿½ï¿½ï¿½Ú¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¾ï¿½ï¿½ï¿½
 		int cxIcon = GetSystemMetrics(SM_CXICON);
 		int cyIcon = GetSystemMetrics(SM_CYICON);
 		CRect rect;
@@ -186,7 +161,7 @@ void CRemoteClientDlg::OnPaint()
 		int x = (rect.Width() - cxIcon + 1) / 2;
 		int y = (rect.Height() - cyIcon + 1) / 2;
 
-		// »æÖÆÍ¼±ê
+		// ï¿½ï¿½ï¿½ï¿½Í¼ï¿½ï¿½
 		dc.DrawIcon(x, y, m_hIcon);
 	}
 	else
@@ -195,8 +170,8 @@ void CRemoteClientDlg::OnPaint()
 	}
 }
 
-//µ±ÓÃ»§ÍÏ¶¯×îĞ¡»¯´°¿ÚÊ±ÏµÍ³µ÷ÓÃ´Ëº¯ÊıÈ¡µÃ¹â±ê
-//ÏÔÊ¾¡£
+//ï¿½ï¿½ï¿½Ã»ï¿½ï¿½Ï¶ï¿½ï¿½ï¿½Ğ¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ÏµÍ³ï¿½ï¿½ï¿½Ã´Ëºï¿½ï¿½ï¿½È¡ï¿½Ã¹ï¿½ï¿½
+//ï¿½ï¿½Ê¾ï¿½ï¿½
 HCURSOR CRemoteClientDlg::OnQueryDragIcon()
 {
 	return static_cast<HCURSOR>(m_hIcon);
@@ -205,203 +180,188 @@ HCURSOR CRemoteClientDlg::OnQueryDragIcon()
 
 void CRemoteClientDlg::OnBnClickedButtonTest()
 {
-	SendCommandPacket(1981, NULL, 0);
+	// åªè´Ÿè´£æŠ•é€’ã€‚è¿æ²¡è¿ä¸Šï¼Œè¦ç­‰ WM_SEND_PACK_ACK
+	if (!CClientController::getInstance()->SendCommandPacket(GetSafeHwnd(), 1981))
+	{
+		AfxMessageBox(_T("post command failed"));
+	}
 }
 
 void CRemoteClientDlg::OnIpnFieldchangedIpaddressServ(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	LPNMIPADDRESS pIPAddr = reinterpret_cast<LPNMIPADDRESS>(pNMHDR);
-	// TODO: ÔÚ´ËÌí¼Ó¿Ø¼şÍ¨Öª´¦Àí³ÌĞò´úÂë
+	// TODO: ï¿½Ú´ï¿½ï¿½ï¿½ï¿½Ó¿Ø¼ï¿½Í¨Öªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	*pResult = 0;
 }
 
 void CRemoteClientDlg::OnTvnSelchangedTreeDir(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	LPNMTREEVIEW pNMTreeView = reinterpret_cast<LPNMTREEVIEW>(pNMHDR);
-	// TODO: ÔÚ´ËÌí¼Ó¿Ø¼şÍ¨Öª´¦Àí³ÌĞò´úÂë
+	// TODO: ï¿½Ú´ï¿½ï¿½ï¿½ï¿½Ó¿Ø¼ï¿½Í¨Öªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	*pResult = 0;
 }
 
 void CRemoteClientDlg::OnLvnItemchangedListFile(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	LPNMLISTVIEW pNMLV = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
-	// TODO: ÔÚ´ËÌí¼Ó¿Ø¼şÍ¨Öª´¦Àí³ÌĞò´úÂë
+	// TODO: ï¿½Ú´ï¿½ï¿½ï¿½ï¿½Ó¿Ø¼ï¿½Í¨Öªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	*pResult = 0;
 }
 
 void CRemoteClientDlg::OnBnClickedButtonFileinfo()
 {
-	int  ret = SendCommandPacket(1);
-	if (ret == -1)
+	if (!CClientController::getInstance()->SendCommandPacket(GetSafeHwnd(), 1, true, NULL, 0))
 	{
-		AfxMessageBox(_T("ÃüÁî´¦ÀíÊ§°Ü!"));
+		AfxMessageBox(_T("post command failed"));
 		return;
 	}
-	CClientSocket* pClient = CClientSocket::getInstance();
-	std::string drivers = pClient->GetPacket().strData;
-	std::string dr;
-	m_Tree.DeleteAllItems();
-	for (size_t i = 0; i < drivers.size(); i++)
+	return;
+}
+
+LRESULT CRemoteClientDlg::OnSendPackAck(WPARAM wParam, LPARAM lParam)
+{
+	if (lParam == -1 || lParam == -2)
 	{
-		if (drivers[i] == ',')
+		m_bDirLoading = false;
+		if (CClientController::getInstance()->IsDownloading())
+			CClientController::getInstance()->DownloadAbort();
+		else
+			AfxMessageBox(_T("send failed"));
+		return 0;
+	}
+	if (lParam == 1 || wParam == NULL)
+	{
+		m_bDirLoading = false;
+		if (CClientController::getInstance()->IsDownloading())
+			CClientController::getInstance()->DownloadAbort();
+		return 0;
+	}
+	CPacket* pPacket = (CPacket*)wParam;
+	CPacket head = *pPacket;
+	delete pPacket;
+	switch (head.sCmd)
+	{
+	case 1:
+	{
+		std::string drivers = head.strData;
+		std::string dr;
+		m_Tree.DeleteAllItems();
+		for (size_t i = 0; i < drivers.size(); i++)
+		{
+			if (drivers[i] == ',')
+			{
+				dr += ':';
+				HTREEITEM hTemp = m_Tree.InsertItem(dr.c_str(), TVI_ROOT, TVI_LAST);
+				m_Tree.InsertItem(NULL, hTemp, TVI_LAST);
+				dr.clear();
+				continue;
+			}
+			dr += drivers[i];
+		}
+		if (!dr.empty())
 		{
 			dr += ':';
 			HTREEITEM hTemp = m_Tree.InsertItem(dr.c_str(), TVI_ROOT, TVI_LAST);
 			m_Tree.InsertItem(NULL, hTemp, TVI_LAST);
-			dr.clear();
-			continue;
 		}
-		dr += drivers[i];
+		break;
 	}
-	dr += ':';
-	HTREEITEM hTemp = m_Tree.InsertItem(dr.c_str(), TVI_ROOT, TVI_LAST);
-	m_Tree.InsertItem(NULL, hTemp, TVI_LAST);
-	dr.clear();
-}
-
-void CRemoteClientDlg::threadEntryForWatchData(void* arg)
-{
-	CRemoteClientDlg* thiz = (CRemoteClientDlg*)arg;
-	thiz->threadWatchData();
-	_endthread();
-}
-
-void CRemoteClientDlg::threadWatchData()
-{
-	CClientSocket* pClient = NULL;
-	do {
-		pClient = CClientSocket::getInstance();
-	} while (pClient == NULL);
-	for (;;)
-	{
-		if (m_isFull == false)
-		{
-			int ret = SendMessage(WM_SEND_PACKET, 6 << 1 | 1);
-			if (ret == 6)
-			{
-
-				BYTE* pData = (BYTE*)pClient->GetPacket().strData.c_str();
-				HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, pClient->GetPacket().strData.size());
-				if (hMem == NULL)
-				{
-					TRACE("ÄÚ´æ²»×ã!");
-					Sleep(1);
-					continue;
-				}
-				IStream* pStream = NULL;
-				HRESULT hRet = CreateStreamOnHGlobal(hMem, TRUE, &pStream);
-				if (hRet == S_OK)
-				{
-					ULONG length = 0;
-					pStream->Write(pData, pClient->GetPacket().strData.size(), &length);
-					LARGE_INTEGER bg = { 0 };
-					pStream->Seek(bg, STREAM_SEEK_SET, NULL);
-					m_image.Load(pStream);
-					m_isFull = true;
-				}
-			}
-			else
-			{
-				Sleep(1);
-			}
-		}
-		else
-		{
-			Sleep(1);
-		}
+	case 1981:
+		MessageBox(_T("connect ok"), _T("ok"), MB_ICONINFORMATION);
+		break;
+	case 2:
+		if (head.strData.size() >= sizeof(FILEINFO))
+			UpdateFileInfo(*(PFILEINFO)head.strData.c_str(), (HTREEITEM)lParam);
+		break;
+	case 3:
+		MessageBox(_T("open file ok"), _T("done"), MB_ICONINFORMATION);
+		break;
+	case 4:
+		UpdateDownloadFile(head.strData, (FILE*)lParam);
+		break;
+	case 9:
+		LoadFileCurrent();
+		break;
+	default:
+		break;
 	}
-
-}
-
-void CRemoteClientDlg::threadEntryForDownloadFile(void* arg)
-{
-	CRemoteClientDlg* thiz = (CRemoteClientDlg*)arg;
-	thiz->threadDownFile();
-	_endthread();
-}
-
-void CRemoteClientDlg::threadDownFile()
-{
-	int nListSelected = m_List.GetSelectionMark();
-	CString strFile = m_List.GetItemText(nListSelected, 0);
-	CFileDialog dlg(FALSE, NULL,
-		strFile,
-		OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT, NULL, this);
-	if (dlg.DoModal() == IDOK)
-	{
-		FILE* pFile = fopen(dlg.GetPathName(), "wb+");
-		if (pFile == NULL)
-		{
-			AfxMessageBox(_T("±¾µØÃ»ÓĞÈ¨ÏŞ±£´æ¸ÃÎÄ¼ş,»òÕßÎÄ¼şÎŞ·¨´´½¨!"));
-			m_dlgStatus.ShowWindow(SW_HIDE);
-			EndWaitCursor();
-			return;
-		}
-		HTREEITEM hSelected = m_Tree.GetSelectedItem();
-		strFile = GetPath(hSelected) + strFile;
-		TRACE("%s\r\n", LPCSTR(strFile));
-		CClientSocket* pClient = CClientSocket::getInstance();
-		do {
-			int ret = SendMessage(WM_SEND_PACKET, 4 << 1 | 0, (LPARAM)(LPCTSTR)strFile);
-			if (ret < 0)
-			{
-				AfxMessageBox("Ö´ĞĞÏÂÔØÃüÁîÊ§°Ü!");
-				TRACE("Ö´ĞĞÏÂÔØÊ§°Ü:ret=%d\r\n", ret);
-				return;
-			}
-			long long nLength = *(long long*)pClient->GetPacket().strData.c_str();
-			if (nLength == 0)
-			{
-				AfxMessageBox("ÎÄ¼ş³¤¶ÈÎªÁã»òÎŞ·¨¶ÁÈ¡ÎÄ¼ş!");
-				return;
-			}
-			long long nCount = 0;
-			while (nCount < nLength)
-			{
-				ret = pClient->DealCommand();
-				if (ret < 0)
-				{
-					AfxMessageBox(_T("´«ÊäÊ§°Ü!"));
-					TRACE("´«ÊäÊ§°Ü:ret=%d\r\n", ret);
-					break;
-				}
-				fwrite(pClient->GetPacket().strData.c_str(), 1,
-					pClient->GetPacket().strData.size(), pFile);
-				nCount += pClient->GetPacket().strData.size();
-			}
-
-		} while (false);
-		fclose(pFile);
-		pClient->CloseSocket();
-	}
-	m_dlgStatus.ShowWindow(SW_HIDE);
-	EndWaitCursor();
-	MessageBox(_T("ÏÂÔØÍê³É!!"), _T("Íê³É"));
+	return 0;
 }
 
 void CRemoteClientDlg::LoadFileCurrent()
 {
-	HTREEITEM hTree = m_Tree.GetSelectedItem();
-	CString strPath = GetPath(hTree);
+	RequestDir(m_Tree.GetSelectedItem());
+}
+
+void CRemoteClientDlg::RequestDir(HTREEITEM hTree)
+{
+	if (hTree == NULL || m_bDirLoading)
+		return;
+	// å…ˆåˆ æ‰æ—§å­èŠ‚ç‚¹å’Œå ä½ç©ºé¡¹ï¼Œå†è¯·æ±‚ã€‚ä¸åˆ çš„è¯ï¼Œåˆ é™¤æ–‡ä»¶ååˆ·æ–°ä¼šæŠŠåŒä¸€å±‚æ–‡ä»¶å¤¹å†æ’ä¸€é
+	DeleteTreeChildrenItem(hTree);
 	m_List.DeleteAllItems();
-	int nCmd = SendCommandPacket(2, FALSE, (BYTE*)(LPCTSTR)strPath, strPath.GetLength());
-	PFILEINFO pInfo = (PFILEINFO)CClientSocket::getInstance()->GetPacket().strData.c_str();
-	CClientSocket* pClient = CClientSocket::getInstance();
-	while (pInfo->HasNext)
+	CString strPath = GetPath(hTree);
+	m_bDirLoading = true;
+	if (!CClientController::getInstance()->SendCommandPacket(
+		GetSafeHwnd(), 2, false,
+		(BYTE*)(LPCTSTR)strPath, strPath.GetLength(),
+		(WPARAM)hTree))
 	{
-		if (!pInfo->IsDirectory)
-		{
-			m_List.InsertItem(0, pInfo->szFileName);
-		}
-		int cmd = pClient->DealCommand();
-		TRACE("ack:%d\r\n", cmd);
-		if (cmd < 0)
-		{
-			break;
-		}
-		pInfo = (PFILEINFO)CClientSocket::getInstance()->GetPacket().strData.c_str();
+		m_bDirLoading = false;
 	}
-	pClient->CloseSocket();
+}
+
+void CRemoteClientDlg::UpdateFileInfo(const FILEINFO& finfo, HTREEITEM hParent)
+{
+	if (finfo.HasNext == FALSE || finfo.IsInvalid)
+	{
+		m_bDirLoading = false;
+		if (hParent != NULL && finfo.HasNext == FALSE)
+			m_Tree.Expand(hParent, TVE_EXPAND);
+		return;
+	}
+	if (finfo.IsDirectory)
+	{
+		if (CString(finfo.szFileName) == "." || CString(finfo.szFileName) == "..")
+			return;
+		HTREEITEM hTemp = m_Tree.InsertItem(finfo.szFileName, hParent, TVI_LAST);
+		m_Tree.InsertItem("", hTemp, TVI_LAST);
+	}
+	else
+	{
+		m_List.InsertItem(0, finfo.szFileName);
+	}
+}
+
+static long long s_downLength = 0;
+static long long s_downIndex = 0;
+
+void CRemoteClientDlg::ResetDownloadProgress()
+{
+	s_downLength = 0;
+	s_downIndex = 0;
+}
+
+void CRemoteClientDlg::UpdateDownloadFile(const std::string& strData, FILE* pFile)
+{
+	if (pFile == NULL)
+		return;
+	if (s_downLength == 0)
+	{
+		if (strData.size() < sizeof(long long))
+			return;
+		s_downLength = *(long long*)strData.c_str();
+		if (s_downLength == 0)
+		{
+			AfxMessageBox(_T("file length is zero"));
+			CClientController::getInstance()->DownloadAbort();
+		}
+		return;
+	}
+	fwrite(strData.c_str(), 1, strData.size(), pFile);
+	s_downIndex += (long long)strData.size();
+	if (s_downIndex >= s_downLength)
+		CClientController::getInstance()->DownloadEnd();
 }
 
 void CRemoteClientDlg::LoadFileInfo()
@@ -411,50 +371,8 @@ void CRemoteClientDlg::LoadFileInfo()
 	m_Tree.ScreenToClient(&ptMouse);
 	HTREEITEM hTreeSelected = m_Tree.HitTest(ptMouse, 0);
 	if (hTreeSelected == NULL)
-	{
 		return;
-	}
-	if (m_Tree.GetChildItem(hTreeSelected) == NULL)
-	{
-		return;
-	}
-	DeleteTreeChildrenItem(hTreeSelected);
-	m_List.DeleteAllItems();
-	CString strPath = GetPath(hTreeSelected);
-	int nCmd = SendCommandPacket(2, FALSE, (BYTE*)(LPCTSTR)strPath, strPath.GetLength());
-	PFILEINFO pInfo = (PFILEINFO)CClientSocket::getInstance()->GetPacket().strData.c_str();
-	CClientSocket* pClient = CClientSocket::getInstance();
-	while (pInfo->HasNext)
-	{
-		if (pInfo->IsDirectory)
-		{
-			if (CString(pInfo->szFileName) == "." || CString(pInfo->szFileName) == "..")
-			{
-				int cmd = pClient->DealCommand();
-				TRACE("ack:%d\r\n", cmd);
-				if (cmd < 0)
-				{
-					break;
-				}
-				pInfo = (PFILEINFO)CClientSocket::getInstance()->GetPacket().strData.c_str();
-				continue;
-			}
-			HTREEITEM hTemp = m_Tree.InsertItem(pInfo->szFileName, hTreeSelected, TVI_LAST);
-			m_Tree.InsertItem("", hTemp, TVI_LAST);
-		}
-		else
-		{
-			m_List.InsertItem(0, pInfo->szFileName);
-		}
-		int cmd = pClient->DealCommand();
-		TRACE("ack:%d\r\n", cmd);
-		if (cmd < 0)
-		{
-			break;
-		}
-		pInfo = (PFILEINFO)CClientSocket::getInstance()->GetPacket().strData.c_str();
-	}
-	pClient->CloseSocket();
+	RequestDir(hTreeSelected);
 }
 
 CString CRemoteClientDlg::GetPath(HTREEITEM hTree)
@@ -481,16 +399,32 @@ void CRemoteClientDlg::DeleteTreeChildrenItem(HTREEITEM hTree)
 
 void CRemoteClientDlg::OnNMDblclkTreeDir(NMHDR* pNMHDR, LRESULT* pResult)
 {
-	// TODO: ÔÚ´ËÌí¼Ó¿Ø¼şÍ¨Öª´¦Àí³ÌĞò´úÂë
+	// åŒå‡»ä¼šå…ˆè§¦å‘å•å‡»ã€‚ä¸¤è¾¹éƒ½ LoadFileInfo ä¼šæŠŠåŒä¸€ç›®å½•è¯·æ±‚ä¸¤æ¬¡ï¼Œå­èŠ‚ç‚¹é‡å¤
 	*pResult = 0;
-	LoadFileInfo();
 }
 
 void CRemoteClientDlg::OnNMClickTreeDir(NMHDR* pNMHDR, LRESULT* pResult)
 {
-	// TODO: ÔÚ´ËÌí¼Ó¿Ø¼şÍ¨Öª´¦Àí³ÌĞò´úÂë
 	*pResult = 0;
 	LoadFileInfo();
+}
+
+void CRemoteClientDlg::OnTvnItemexpandingTreeDir(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	LPNMTREEVIEW pNMTreeView = reinterpret_cast<LPNMTREEVIEW>(pNMHDR);
+	*pResult = 0;
+	if (pNMTreeView->action != TVE_EXPAND)
+		return;
+	HTREEITEM hItem = pNMTreeView->itemNew.hItem;
+	HTREEITEM hChild = m_Tree.GetChildItem(hItem);
+	// åªæœ‰å ä½ç©ºé¡¹æ—¶æ‰è¯·æ±‚ã€‚å·²ç»å±•å¼€è¿‡çš„æ–‡ä»¶å¤¹å†å±•å¼€ï¼Œåªæ˜¾ç¤ºå·²æœ‰å­èŠ‚ç‚¹
+	if (hChild != NULL && m_Tree.GetNextSiblingItem(hChild) == NULL
+		&& m_Tree.GetItemText(hChild).IsEmpty())
+	{
+		// è¿™æ¬¡å±•å¼€å…ˆå–æ¶ˆã€‚å ä½é¡¹é©¬ä¸Šä¼šè¢«åˆ æ‰ï¼Œç­‰ç›®å½•åŒ…åˆ°é½å† Expand
+		*pResult = TRUE;
+		RequestDir(hItem);
+	}
 }
 
 void CRemoteClientDlg::OnNMRClickListFile(NMHDR* pNMHDR, LRESULT* pResult)
@@ -514,85 +448,76 @@ void CRemoteClientDlg::OnNMRClickListFile(NMHDR* pNMHDR, LRESULT* pResult)
 
 void CRemoteClientDlg::OnDownloadFile()
 {
-	_beginthread(CRemoteClientDlg::threadEntryForDownloadFile, 0, this);
-	BeginWaitCursor();
-	m_dlgStatus.m_info.SetWindowText(_T("ÃüÁîÕıÔÚÖ´ĞĞÖĞ!"));
-	m_dlgStatus.ShowWindow(SW_SHOW);
-	m_dlgStatus.CenterWindow(this);
-	m_dlgStatus.SetActiveWindow();
+	HTREEITEM hSelected = m_Tree.GetSelectedItem();
+	if (hSelected == NULL) return;
+	int nSelected = m_List.GetSelectionMark();
+	if (nSelected < 0) return;
+	CString strFile = m_List.GetItemText(nSelected, 0);
+	CString strPath = GetPath(hSelected) + strFile;
+	CClientController::getInstance()->DownFile(strPath);
 }
 
 void CRemoteClientDlg::OnDeleteFile()
 {
 	HTREEITEM hSelected = m_Tree.GetSelectedItem();
-	CString strPath = GetPath(hSelected);
+	if (hSelected == NULL)
+		return;
 	int nSelected = m_List.GetSelectionMark();
-	CString strFile = m_List.GetItemText(nSelected, 0);
-	strFile = strPath + strFile;
-	int ret = SendCommandPacket(9, true, (BYTE*)(LPCSTR)strFile, strFile.GetLength());
-	if (ret < 0)
-	{
-		AfxMessageBox(_T("É¾³ıÎÄ¼şÃüÁîÖ´ĞĞÊ§°Ü!"));
-	}
-	LoadFileCurrent();
+	if (nSelected < 0)
+		return;
+	CString strFile = GetPath(hSelected) + m_List.GetItemText(nSelected, 0);
+	CClientController::getInstance()->SendCommandPacket(
+		GetSafeHwnd(), 9, true, (BYTE*)(LPCSTR)strFile, strFile.GetLength());
 }
 
 void CRemoteClientDlg::OnRunFile()
 {
 	HTREEITEM hSelected = m_Tree.GetSelectedItem();
-	CString strPath = GetPath(hSelected);
+	if (hSelected == NULL)
+		return;
 	int nSelected = m_List.GetSelectionMark();
-	CString strFile = m_List.GetItemText(nSelected, 0);
-	strFile = strPath + strFile;
-	int ret = SendCommandPacket(3, true, (BYTE*)(LPCSTR)strFile, strFile.GetLength());
-	if (ret < 0)
-	{
-		AfxMessageBox(_T("´ò¿ªÎÄ¼şÃüÁîÖ´ĞĞÊ§°Ü!"));
-	}
+	if (nSelected < 0)
+		return;
+	CString strFile = GetPath(hSelected) + m_List.GetItemText(nSelected, 0);
+	CClientController::getInstance()->SendCommandPacket(
+		GetSafeHwnd(), 3, true, (BYTE*)(LPCSTR)strFile, strFile.GetLength());
 }
 
 LRESULT CRemoteClientDlg::OnSendPacket(WPARAM wParam, LPARAM lParam)
 {
-	int ret = 0;
-	int cmd = wParam >> 1;
+	int cmd = (int)(wParam >> 1);
+	bool autoClose = (wParam & 1) != 0;
+	CClientController* pCtrl = CClientController::getInstance();
 	switch (cmd)
 	{
 	case 4:
 	{
 		CString strFile = (LPCSTR)lParam;
-		ret = SendCommandPacket(cmd, wParam & 1, (BYTE*)(LPCSTR)strFile, strFile.GetLength());
+		pCtrl->SendCommandPacket(GetSafeHwnd(), cmd, autoClose, (BYTE*)(LPCSTR)strFile, strFile.GetLength());
+		break;
 	}
-	break;
 	case 5:
-	{
-		ret = SendCommandPacket(cmd, wParam & 1, (BYTE*)lParam, sizeof(MOUSEEV));
-	}
-	break;
+		pCtrl->SendCommandPacket(GetSafeHwnd(), cmd, autoClose, (BYTE*)lParam, sizeof(MOUSEEV));
+		break;
 	case 6:
 	case 7:
 	case 8:
-	{
-		ret = SendCommandPacket(cmd, wParam & 1);
-	}
-	break;
-	default:
-		ret = -1;
+		pCtrl->SendCommandPacket(GetSafeHwnd(), cmd, autoClose);
 		break;
+	default:
+		return -1;
 	}
-	return ret;
-
+	return 0;
 }
 
 void CRemoteClientDlg::OnBnClickedBtnStartWatch()
 {
-	CWatchDialog dlg(this);
-	_beginthread(CRemoteClientDlg::threadEntryForWatchData, 0, this);
-	dlg.DoModal();
+	CClientController::getInstance()->StartWatchScreen();
 }
 
 void CRemoteClientDlg::OnTimer(UINT_PTR nIDEvent)
 {
-	// TODO: ÔÚ´ËÌí¼ÓÏûÏ¢´¦Àí³ÌĞò´úÂëºÍ/»òµ÷ÓÃÄ¬ÈÏÖµ
+	// TODO: ï¿½Ú´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½ï¿½Ä¬ï¿½ï¿½Öµ
 
 	CDialogEx::OnTimer(nIDEvent);
 }

@@ -18,17 +18,36 @@ public:
 #endif
 
 protected:
+	CImage m_image;
+	bool m_isFull;
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV 支持
 
 	DECLARE_MESSAGE_MAP()
 public:
+	bool isFull()const
+	{
+		return m_isFull;
+	}
+	CImage& getImage()
+	{
+		return m_image;
+	}
+	void SetImageStatus(bool isFull = false)
+	{
+		m_isFull = isFull;
+	}
+
 	virtual BOOL OnInitDialog();
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg LRESULT OnSendPackAck(WPARAM wParam, LPARAM lParam);
 	CStatic m_picture;
 
-	// 把本机监视画面上的点，换算成被控端真实屏幕坐标
-	CPoint UserPoint2RemoteScreenPoint(CPoint point, bool isScreen);
+	// 监视画面上的点 → 被控端屏幕坐标。
+	// isScreen 为 false：point 是对话框客户区坐标，要先变到屏幕坐标。
+	// isScreen 为 true：point 已经是屏幕坐标（PreTranslateMessage 的 pMsg->pt），不能再转一次。
+	// 点不在画面控件客户区里时返回 false。
+	bool UserPoint2RemoteScreenPoint(CPoint point, bool isScreen, CPoint& remote);
 	void SendRemoteMouse(WORD nButton, WORD nAction, CPoint point, bool isScreen);
 
 	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);

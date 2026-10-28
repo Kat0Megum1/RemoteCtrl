@@ -1,7 +1,7 @@
 #pragma once
 #include <map>
 #include "LockDialog.h"
-#include "ServerSocket.h"
+#include "Packet.h"
 #include <io.h>
 #include <direct.h>
 #include <atlimage.h>
@@ -12,14 +12,28 @@ class CCommand
 public:
 	CCommand();
 	~CCommand();
-	int ExcuteCommand(int nCmd);
+	int ExcuteCommand(int nCmd, std::list<CPacket>& lstPacket, CPacket& inPacket);
+	static void RunCommand(void* arg, int status, std::list<CPacket>& lstPacket, CPacket& inPacket)
+	{
+		CCommand* thiz = (CCommand*)arg;
+		if (status > 0)
+		{
+			int ret = thiz->ExcuteCommand(status, lstPacket, inPacket);
+			if (ret != 0) {
+				TRACE("command failed %d ret=%d\r\n", status, ret);
+			}
+		}
+		else {
+			MessageBox(NULL, _T("cannot accept client"), _T("init failed"), MB_OK | MB_ICONERROR);
+		}
+	}
 protected:
-	typedef int (CCommand::* CMDFUNC)();
+	typedef int (CCommand::* CMDFUNC)(std::list<CPacket>& lstPacket, CPacket& inPacket);
 	std::map<int, CMDFUNC> m_mapFunction;
 	CLockDialog dlg;
 	unsigned threadid;
 protected:
-	int MakeDriverInfo()
+	int MakeDriverInfo(std::list<CPacket>& lstPacket, CPacket& inPacket)
 	{
 		std::string result;
 		DWORD driveBit = GetLogicalDrives();
@@ -33,221 +47,252 @@ protected:
 			}
 		}
 		CPacket packet(1, (BYTE*)result.c_str(), result.size());
-		CServerSocket::getInstance()->Send(packet);
+		lstPacket.push_back(packet);
 
 		return 0;
 	}
 
-	int MakeDirectoryInfo()
+	int MakeDirectoryInfo(std::list<CPacket>& lstPacket, CPacket& inPacket)
 	{
-		std::string strPath;
-		if (CServerSocket::getInstance()->GetFilePath(strPath) == false)
-		{
-			OutputDebugString(_T("µ±Ç°µÄÃüÁî£¬²»ÊÇ»ñÈ¡ÎÄ¼şÁĞ±í£¬ÃüÁî½âÎö´íÎó£¡"));
-			return -1;
-		}
-		if (_chdir(strPath.c_str()) != 0)
+		std::string strPath = inPacket.strData;
+		if (_chdir(inPacket.strData.c_str()) != 0)
 		{
 			FILEINFO finfo;
+			finfo.IsInvalid = TRUE;
 			finfo.HasNext = FALSE;
 			CPacket packet(2, (BYTE*)&finfo, sizeof(finfo));
-			CServerSocket::getInstance()->Send(packet);
-			OutputDebugString(_T("Ã»ÓĞÈ¨ÏŞ£¬·ÃÎÊÄ¿Â¼£¡"));
+			lstPacket.push_back(packet);
+			OutputDebugString(_T("no permission"));
 			return -2;
 		}
 		_finddata_t fdata;
 		intptr_t hfind = 0;
 		if ((hfind = _findfirst("*", &fdata)) == -1)
 		{
-			OutputDebugString(_T("Ã»ÓĞÕÒµ½ÈÎºÎÎÄ¼ş£¡"));
+			OutputDebugString(_T("no file"));
 			FILEINFO finfo;
+			finfo.IsInvalid = TRUE;
 			finfo.HasNext = FALSE;
 			CPacket packet(2, (BYTE*)&finfo, sizeof(finfo));
-			CServerSocket::getInstance()->Send(packet);
+			lstPacket.push_back(packet);
 			return -3;
 		}
+		int count = 0;
 		do
 		{
 			FILEINFO finfo;
 			finfo.IsDirectory = (fdata.attrib & _A_SUBDIR) != 0;
-			memcpy(finfo.szFileName, fdata.name, strlen(fdata.name));
+			// szFileName åªæœ‰ 256ï¼Œ_finddata_t::name æ›´é•¿ï¼ŒæŒ‰ strlen ç›´æ‹·ä¼šè¶Šç•Œ
+			size_t nName = strlen(fdata.name);
+			if (nName >= sizeof(finfo.szFileName))
+				nName = sizeof(finfo.szFileName) - 1;
+			memcpy(finfo.szFileName, fdata.name, nName);
 			CPacket packet(2, (BYTE*)&finfo, sizeof(finfo));
-			CServerSocket::getInstance()->Send(packet);
+			lstPacket.push_back(packet);
+			count++;
 		} while (!_findnext(hfind, &fdata));
+		_findclose(hfind);
+		TRACE("server:count=%d\r\n", count);
 		FILEINFO finfo;
 		finfo.HasNext = FALSE;
 		CPacket packet(2, (BYTE*)&finfo, sizeof(finfo));
-		CServerSocket::getInstance()->Send(packet);
+		lstPacket.push_back(packet);
 		return 0;
 	}
 
-	int RunFile()
+	int RunFile(std::list<CPacket>& lstPacket, CPacket& inPacket)
 	{
-		std::string strPath;
-		CServerSocket::getInstance()->GetFilePath(strPath);
+		std::string strPath = inPacket.strData;
 		ShellExecuteA(NULL, NULL, strPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
 		CPacket packet(3, NULL, 0);
-		CServerSocket::getInstance()->Send(packet);
+		lstPacket.push_back(packet);
 		return 0;
 	}
 
-	int DownloadFile()
+	int DownloadFile(std::list<CPacket>& lstPacket, CPacket& inPacket)
 	{
-		std::string strPath;
-		CServerSocket::getInstance()->GetFilePath(strPath);
+		std::string strPath = inPacket.strData;
 		long long data = 0;
 		FILE* pFile = NULL;
 		errno_t err = fopen_s(&pFile, strPath.c_str(), "rb");
 		if (err != 0)
 		{
-			CPacket packet(4, (BYTE*)&data, 0);
-			CServerSocket::getInstance()->Send(packet);
+			// å¤±è´¥ä¹Ÿå‘ 8 å­—èŠ‚ 0ã€‚é•¿åº¦ä¸º 0 çš„åŒ…å®¢æˆ·ç«¯ä¼šå½“æˆâ€œé•¿åº¦è¿˜æ²¡åˆ°â€ç›´æ¥ä¸¢æ‰ï¼Œä¸‹è½½æ¡†å°±åœä½
+			CPacket packet(4, (BYTE*)&data, 8);
+			lstPacket.push_back(packet);
 			return -1;
 		}
 		if (pFile != NULL)
 		{
-			fseek(pFile, 0, SEEK_END);
-			data = ftell(pFile);
+			_fseeki64(pFile, 0, SEEK_END);
+			data = _ftelli64(pFile);
+			if (data < 0)
+				data = 0;
 			CPacket head(4, (BYTE*)&data, 8);
-			CServerSocket::getInstance()->Send(head);
-			fseek(pFile, 0, SEEK_SET);
+			lstPacket.push_back(head);
+			_fseeki64(pFile, 0, SEEK_SET);
 			char buffer[1024] = "";
 			size_t rlen = 0;
 			do
 			{
 				rlen = fread(buffer, 1, 1024, pFile);
+				if (rlen == 0)
+					break;
 				CPacket packet(4, (BYTE*)buffer, rlen);
-				CServerSocket::getInstance()->Send(packet);
+				lstPacket.push_back(packet);
 			} while (rlen >= 1024);
 			fclose(pFile);
 		}
-		CPacket packet(4, NULL, 0);
-		CServerSocket::getInstance()->Send(packet);
-		return 0;
-	}
-
-	int MouseEvent()
-	{
-		MOUSEEV mouse;
-		if (CServerSocket::getInstance()->GetMouseEvent(mouse))
-		{
-			DWORD nFlags = 0;
-			switch (mouse.nButton)
-			{
-			case 0://×ó¼ü
-				nFlags = 1;
-				break;
-			case 1://ÓÒ¼ü
-				nFlags = 2;
-				break;
-			case 2://ÖĞ¼ü
-				nFlags = 4;
-				break;
-			case 3://Ã»ÓĞ°´¼ü£¨ÒÆ¶¯£©
-				nFlags = 8;
-				break;
-			}
-			SetCursorPos(mouse.ptXY.x, mouse.ptXY.y);
-			switch (mouse.nAction)
-			{
-			case 0://µ¥»÷
-				nFlags |= 0x10;
-				break;
-			case 1://Ë«»÷
-				nFlags |= 0x20;
-				break;
-			case 2://°´ÏÂ
-				nFlags |= 0x40;
-				break;
-			case 3://·Å¿ª
-				nFlags |= 0x80;
-				break;
-			default:
-				// 4£º´¿ÒÆ¶¯£¬²»¼Ó¶¯×÷Î»£¬±£³Ö nFlags==8
-				break;
-			}
-			switch (nFlags)
-			{
-			case 0x21://×ó¼üË«»÷
-				mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, GetMessageExtraInfo());
-				mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, GetMessageExtraInfo());
-			case 0x11://×ó¼üµ¥»÷
-				mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, GetMessageExtraInfo());
-				mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, GetMessageExtraInfo());
-				break;
-			case 0x41://×ó¼ü°´ÏÂ
-				mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, GetMessageExtraInfo());
-				break;
-			case 0x81://×ó¼ü·Å¿ª
-				mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, GetMessageExtraInfo());
-				break;
-			case 0x22://ÓÒ¼üË«»÷
-				mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, GetMessageExtraInfo());
-				mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, GetMessageExtraInfo());
-			case 0x12://ÓÒ¼üµ¥»÷
-				mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, GetMessageExtraInfo());
-				mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, GetMessageExtraInfo());
-				break;
-			case 0x42://ÓÒ¼ü°´ÏÂ
-				mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, GetMessageExtraInfo());
-				break;
-			case 0x82://ÓÒ¼ü·Å¿ª
-				mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, GetMessageExtraInfo());
-				break;
-			case 0x24://ÖĞ¼üË«»÷
-				mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, GetMessageExtraInfo());
-				mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, GetMessageExtraInfo());
-			case 0x14://ÖĞ¼üµ¥»÷
-				mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, GetMessageExtraInfo());
-				mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, GetMessageExtraInfo());
-				break;
-			case 0x44://ÖĞ¼ü°´ÏÂ
-				mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, GetMessageExtraInfo());
-				break;
-			case 0x84://ÖĞ¼ü·Å¿ª
-				mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, GetMessageExtraInfo());
-				break;
-			case 0x08://µ¥´¿µÄÊó±êÒÆ¶¯£¨×ø±êÒÑÓÉ SetCursorPos ÉèÖÃ£©
-				break;
-			}
-			CPacket packet(5, NULL, 0);
-			CServerSocket::getInstance()->Send(packet);
-		}
 		else
 		{
-			OutputDebugString(_T("»ñÈ¡Êó±ê²Ù×÷²ÎÊıÊ§°Ü£¡"));
-			return -1;
+			CPacket packet(4, (BYTE*)&data, 8);
+			lstPacket.push_back(packet);
 		}
 		return 0;
 	}
 
-	int SendScreen()
+	int MouseEvent(std::list<CPacket>& lstPacket, CPacket& inPacket)
+	{
+		MOUSEEV mouse;
+		memcpy(&mouse, inPacket.strData.c_str(), sizeof(MOUSEEV));
+		DWORD nFlags = 0;
+		switch (mouse.nButton)
+		{
+		case 0://ï¿½ï¿½ï¿½
+			nFlags = 1;
+			break;
+		case 1://ï¿½Ò¼ï¿½
+			nFlags = 2;
+			break;
+		case 2://ï¿½Ğ¼ï¿½
+			nFlags = 4;
+			break;
+		case 3://Ã»ï¿½Ğ°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½ï¿½
+			nFlags = 8;
+			break;
+		}
+		SetCursorPos(mouse.ptXY.x, mouse.ptXY.y);
+		switch (mouse.nAction)
+		{
+		case 0://ï¿½ï¿½ï¿½ï¿½
+			nFlags |= 0x10;
+			break;
+		case 1://Ë«ï¿½ï¿½
+			nFlags |= 0x20;
+			break;
+		case 2://ï¿½ï¿½ï¿½ï¿½
+			nFlags |= 0x40;
+			break;
+		case 3://ï¿½Å¿ï¿½
+			nFlags |= 0x80;
+			break;
+		default:
+			// 4ï¿½ï¿½ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó¶ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ nFlags==8
+			break;
+		}
+		switch (nFlags)
+		{
+		case 0x21://ï¿½ï¿½ï¿½Ë«ï¿½ï¿½
+			mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, GetMessageExtraInfo());
+		case 0x11://ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+			mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x41://ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+			mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x81://ï¿½ï¿½ï¿½ï¿½Å¿ï¿½
+			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x22://ï¿½Ò¼ï¿½Ë«ï¿½ï¿½
+			mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, GetMessageExtraInfo());
+		case 0x12://ï¿½Ò¼ï¿½ï¿½ï¿½ï¿½ï¿½
+			mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x42://ï¿½Ò¼ï¿½ï¿½ï¿½ï¿½ï¿½
+			mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x82://ï¿½Ò¼ï¿½ï¿½Å¿ï¿½
+			mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x24://ï¿½Ğ¼ï¿½Ë«ï¿½ï¿½
+			mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, GetMessageExtraInfo());
+		case 0x14://ï¿½Ğ¼ï¿½ï¿½ï¿½ï¿½ï¿½
+			mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x44://ï¿½Ğ¼ï¿½ï¿½ï¿½ï¿½ï¿½
+			mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x84://ï¿½Ğ¼ï¿½ï¿½Å¿ï¿½
+			mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x08://ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ SetCursorPos ï¿½ï¿½ï¿½Ã£ï¿½
+			break;
+		}
+		CPacket packet(5, NULL, 0);
+		lstPacket.push_back(packet);
+
+		return 0;
+	}
+
+	int SendScreen(std::list<CPacket>& lstPacket, CPacket& inPacket)
 	{
 		CImage screen;
 		HDC hScreen = ::GetDC(NULL);
+		if (hScreen == NULL)
+			return -1;
 		int nBitPerPixel = GetDeviceCaps(hScreen, BITSPIXEL);
 		int nWidth = GetDeviceCaps(hScreen, HORZRES);
-		int nHeigth = GetDeviceCaps(hScreen, VERTRES);
-		screen.Create(nWidth, nHeigth, nBitPerPixel);
-		BitBlt(screen.GetDC(), 0, 0, 2560, 1440, hScreen, 0, 0, SRCCOPY);
-		ReleaseDC(NULL, hScreen);
+		int nHeight = GetDeviceCaps(hScreen, VERTRES);
+		// 32 ä½å›¾çš„ alpha æ˜¯ 0ï¼Œå­˜æˆ PNG å†ç”»å‡ºæ¥æ˜¯å…¨é€æ˜ã€‚24 ä½æ²¡æœ‰é€æ˜é€šé“
+		if (nBitPerPixel != 24)
+			nBitPerPixel = 24;
+		if (!screen.Create(nWidth, nHeight, nBitPerPixel))
+		{
+			::ReleaseDC(NULL, hScreen);
+			return -1;
+		}
+		BitBlt(screen.GetDC(), 0, 0, nWidth, nHeight, hScreen, 0, 0, SRCCOPY);
+		// GetDC æœŸé—´ä½å›¾è¢«é€‰è¿›å†…å­˜ DCï¼Œä¸å…ˆ ReleaseDCï¼ŒSave ä¼šæ‹¿åˆ°ç©ºå›¾
+		screen.ReleaseDC();
+		::ReleaseDC(NULL, hScreen);
+
 		HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, 0);
+		if (hMem == NULL)
+			return -1;
 		IStream* pStream = NULL;
 		HRESULT result = CreateStreamOnHGlobal(hMem, TRUE, &pStream);
-		if (result == S_OK)
+		if (result != S_OK || pStream == NULL)
 		{
-			screen.Save(pStream, Gdiplus::ImageFormatPNG);
-			LARGE_INTEGER bg = { 0 };
-			pStream->Seek(bg, STREAM_SEEK_SET, NULL);
-			PBYTE pData = (PBYTE)GlobalLock(hMem);
-			SIZE_T nSize = GlobalSize(hMem);
-			CPacket packet(6, pData, nSize);
-			CServerSocket::getInstance()->Send(packet);
+			if (pStream != NULL)
+				pStream->Release();
+			else
+				GlobalFree(hMem);
+			return -1;
+		}
+		if (FAILED(screen.Save(pStream, Gdiplus::ImageFormatPNG)))
+		{
+			pStream->Release();
+			return -1;
+		}
+		LARGE_INTEGER bg = { 0 };
+		ULARGE_INTEGER nSize = { 0 };
+		pStream->Seek(bg, STREAM_SEEK_END, &nSize);
+		pStream->Seek(bg, STREAM_SEEK_SET, NULL);
+		PBYTE pData = (PBYTE)GlobalLock(hMem);
+		if (pData != NULL && nSize.QuadPart > 0)
+		{
+			CPacket packet(6, pData, (size_t)nSize.QuadPart);
+			lstPacket.push_back(packet);
 			GlobalUnlock(hMem);
 		}
+		// fDeleteOnRelease ä¸º TRUE æ—¶ï¼ŒRelease ä¼šé‡Šæ”¾ hMemï¼Œä¸èƒ½å† GlobalFree
 		pStream->Release();
-		GlobalFree(hMem);
-		screen.ReleaseDC();
 		return 0;
 	}
 
@@ -258,7 +303,7 @@ protected:
 		_endthreadex(0);
 		return 0;
 	}
-	
+
 	void threadLockDlgMain()
 	{
 		dlg.Create(IDD_DIALOG_INFO, NULL);
@@ -304,41 +349,38 @@ protected:
 		dlg.DestroyWindow();
 	}
 
-	int LockMachine()
+	int LockMachine(std::list<CPacket>& lstPacket, CPacket& inPacket)
 	{
 		if ((dlg.m_hWnd == NULL) || (dlg.m_hWnd == INVALID_HANDLE_VALUE))
 		{
 			_beginthreadex(NULL, 0, threadLockDlg, this, 0, &threadid);
 		}
 		CPacket packet(7, NULL, 0);
-		CServerSocket::getInstance()->Send(packet);
+		lstPacket.push_back(packet);
 		return 0;
 	};
 
-	int UnlockMachine()
+	int UnlockMachine(std::list<CPacket>& lstPacket, CPacket& inPacket)
 	{
 		PostThreadMessage(threadid, WM_KEYDOWN, VK_ESCAPE, 0);
 		CPacket packet(8, NULL, 0);
-		CServerSocket::getInstance()->Send(packet);
+		lstPacket.push_back(packet);
 		return 0;
 	};
 
-	int DeleteLocalFile()
+	int DeleteLocalFile(std::list<CPacket>& lstPacket, CPacket& inPacket)
 	{
-		std::string strPath;
-		CServerSocket::getInstance()->GetFilePath(strPath);
+		std::string strPath = inPacket.strData;
 		DeleteFile(strPath.c_str());
 		CPacket packet(9, NULL, 0);
-		bool ret = CServerSocket::getInstance()->Send(packet);
-		TRACE("Send ret=%d \r\n", ret);
+		lstPacket.push_back(packet);
 		return 0;
 	}
 
-	int TestConnect()
+	int TestConnect(std::list<CPacket>& lstPacket, CPacket& inPacket)
 	{
 		CPacket packet(1981, NULL, 0);
-		bool ret = CServerSocket::getInstance()->Send(packet);
-		TRACE("Send ret=%d \r\n", ret);
+		lstPacket.push_back(packet);
 		return 0;
 	}
 

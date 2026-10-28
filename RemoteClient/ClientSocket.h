@@ -3,6 +3,12 @@
 #include "framework.h"
 #include <string>
 #include <vector>
+#include <map>
+#include <process.h>
+
+#define WM_SEND_PACK (WM_USER + 1)       // 发给网络线程：去发送
+#define WM_SEND_PACK_ACK (WM_USER + 2)   // 网络线程回给窗口：应答到了
+#define CSM_AUTOCLOSE 1
 
 #pragma pack(push)
 #pragma pack(1)
@@ -177,6 +183,15 @@ public:
 		return m_instance;
 	}
 
+	// 记下控制端要连的地址，真正 connect 在网络线程里做
+	void UpdateAddress(int nIP, int nPort)
+	{
+		m_nIP = nIP;
+		m_nPort = nPort;
+	}
+	// 把包交给网络线程；hWnd 用来收回 WM_SEND_PACK_ACK
+	bool SendPacket(HWND hWnd, CPacket pack, bool isAutoClosed = true, WPARAM wParam = 0);
+
 	bool InitSocket(int nIP,int nPort)
 	{
 		if (m_sock != INVALID_SOCKET) CloseSocket();
@@ -189,15 +204,17 @@ public:
 		serv_addr.sin_port = htons(nPort);
 		if (serv_addr.sin_addr.s_addr == INADDR_NONE)
 		{
-			AfxMessageBox("ָ指定的IP地址不存在!");
+			// 网络线程里不能弹框，失败交给 WM_SEND_PACK_ACK 的 lParam
+			TRACE("invalid ip\r\n");
+			CloseSocket();
 			return false;
 		}
 		int result = connect(m_sock, (sockaddr*)&serv_addr, sizeof(serv_addr));
 		if (result == SOCKET_ERROR)
 		{
 			int nErr = WSAGetLastError();
-			AfxMessageBox("连接失败!");
-			TRACE("连接失败:%d %s\r\n", nErr, GetErrorInfo(nErr).c_str());
+			TRACE("connect failed:%d %s\r\n", nErr, GetErrorInfo(nErr).c_str());
+			CloseSocket();
 			return false;
 		}
 		return true;
@@ -293,6 +310,17 @@ private:
 	CPacket m_packet;
 	std::vector<char>m_buffer;
 	size_t m_bufLen = 0;//缓冲区中尚未解析的有效字节数
+	int m_nIP;
+	int m_nPort;
+	HANDLE m_eventInvoke;
+	HANDLE m_hThread;
+	unsigned m_nThreadID;
+	typedef void (CClientSocket::* MSGFUNC)(UINT nMsg, WPARAM wParam, LPARAM lParam);
+	std::map<UINT, MSGFUNC> m_mapFunc;
+	void threadFunc2();
+	static unsigned __stdcall threadEntry(void* arg);
+	void SendPack(UINT nMsg, WPARAM wParam, LPARAM lParam);
+	bool InitSocket();
 
 	CClientSocket& operator=(const CClientSocket&)
 	{
@@ -303,6 +331,12 @@ private:
 		m_sock = ss.m_sock;
 	};
 	CClientSocket()
+		: m_sock(INVALID_SOCKET)
+		, m_bufLen(0)
+		, m_nIP(0)
+		, m_nPort(0)
+		, m_hThread(INVALID_HANDLE_VALUE)
+		, m_nThreadID(0)
 	{
 		if (InitSockEnv() == FALSE)
 		{
@@ -312,10 +346,25 @@ private:
 			exit(0);
 		}
 		m_buffer.resize(BUFFER_SIZE);
+		m_mapFunc.insert(std::make_pair(WM_SEND_PACK, &CClientSocket::SendPack));
+		m_eventInvoke = CreateEvent(NULL, TRUE, FALSE, NULL);
+		m_hThread = (HANDLE)_beginthreadex(NULL, 0, &CClientSocket::threadEntry, this, 0, &m_nThreadID);
+		// 等到线程已经 PeekMessage，消息队列存在之后再关。超时就留给析构，避免线程还没 SetEvent 就把句柄关了
+		if (WaitForSingleObject(m_eventInvoke, 1000) == WAIT_OBJECT_0)
+		{
+			CloseHandle(m_eventInvoke);
+			m_eventInvoke = NULL;
+		}
 	};
 	~CClientSocket()
 	{
 		closesocket(m_sock);
+		m_sock = INVALID_SOCKET;
+		if (m_eventInvoke != NULL)
+		{
+			CloseHandle(m_eventInvoke);
+			m_eventInvoke = NULL;
+		}
 		WSACleanup();
 	};
 	BOOL InitSockEnv()

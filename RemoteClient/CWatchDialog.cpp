@@ -5,7 +5,7 @@
 #include "RemoteClient.h"
 #include "afxdialogex.h"
 #include "CWatchDialog.h"
-#include "RemoteClientDlg.h"
+#include "ClientController.h"
 
 
 // CWatchDialog 对话框
@@ -14,6 +14,7 @@ IMPLEMENT_DYNAMIC(CWatchDialog, CDialogEx)
 
 CWatchDialog::CWatchDialog(CWnd* pParent /*=nullptr*/)
 	: CDialogEx(IDD_DLG_WATCH, pParent)
+	, m_isFull(false)
 	, m_nObjWidth(-1)
 	, m_nObjHeight(-1)
 	, m_nLastMoveTick(0)
@@ -46,40 +47,46 @@ BEGIN_MESSAGE_MAP(CWatchDialog, CDialogEx)
 	ON_WM_MOUSEMOVE()
 	ON_BN_CLICKED(IDC_BTN_LOCK, &CWatchDialog::OnBnClickedBtnLock)
 	ON_BN_CLICKED(IDC_BTN_UNLOCK, &CWatchDialog::OnBnClickedBtnUnlock)
+	ON_MESSAGE(WM_SEND_PACK_ACK, &CWatchDialog::OnSendPackAck)
 END_MESSAGE_MAP()
 
 
 // CWatchDialog 消息处理程序
 
-CPoint CWatchDialog::UserPoint2RemoteScreenPoint(CPoint point, bool isScreen)
+bool CWatchDialog::UserPoint2RemoteScreenPoint(CPoint point, bool isScreen, CPoint& remote)
 {
-	CRect rect;
-	m_picture.GetWindowRect(&rect);
+	remote = CPoint(0, 0);
+	// 还没收到第一张截图时，不知道被控端分辨率，换算没有依据
+	if (m_nObjWidth <= 0 || m_nObjHeight <= 0)
+		return false;
+	// 两条入口的坐标系不一样，这里只补一次，避免屏幕坐标再被当成客户区坐标加一次偏移
 	if (!isScreen)
-	{
 		ClientToScreen(&point);
-	}
-	int nWidth = rect.Width();
-	int nHeight = rect.Height();
-	if (nWidth <= 0 || nHeight <= 0 || m_nObjWidth <= 0 || m_nObjHeight <= 0)
-	{
-		return CPoint(0, 0);
-	}
-	int x = (point.x - rect.left) * m_nObjWidth / nWidth;
-	int y = (point.y - rect.top) * m_nObjHeight / nHeight;
-	if (x < 0) x = 0;
-	if (y < 0) y = 0;
+	// 画面是 StretchBlt 到控件客户区 (0,0) 的。SS_BLACKFRAME 的窗口矩形比客户区大一圈边框，
+	// 用窗口矩形做原点，点会整圈偏到边框上。
+	m_picture.ScreenToClient(&point);
+	CRect client;
+	m_picture.GetClientRect(&client);
+	int nWidth = client.Width();
+	int nHeight = client.Height();
+	if (nWidth <= 0 || nHeight <= 0)
+		return false;
+	// 锁机按钮那一排不在画面上，不能钳到 (0,0)，否则一点按钮就把远端光标甩到左上角
+	if (point.x < 0 || point.y < 0 || point.x >= nWidth || point.y >= nHeight)
+		return false;
+	int x = point.x * m_nObjWidth / nWidth;
+	int y = point.y * m_nObjHeight / nHeight;
 	if (x >= m_nObjWidth) x = m_nObjWidth - 1;
 	if (y >= m_nObjHeight) y = m_nObjHeight - 1;
-	return CPoint(x, y);
+	remote = CPoint(x, y);
+	return true;
 }
 
 void CWatchDialog::SendRemoteMouse(WORD nButton, WORD nAction, CPoint point, bool isScreen)
 {
-	if ((m_nObjWidth == -1) || (m_nObjHeight == -1))
-	{
+	CPoint remote;
+	if (!UserPoint2RemoteScreenPoint(point, isScreen, remote))
 		return;
-	}
 	if (nAction == 4)
 	{
 		ULONGLONG now = GetTickCount64();
@@ -90,19 +97,75 @@ void CWatchDialog::SendRemoteMouse(WORD nButton, WORD nAction, CPoint point, boo
 		m_nLastMoveTick = now;
 	}
 	MOUSEEV event;
-	event.ptXY = UserPoint2RemoteScreenPoint(point, isScreen);
+	event.ptXY = remote;
 	event.nButton = nButton;
 	event.nAction = nAction;
-	CRemoteClientDlg* pParent = (CRemoteClientDlg*)GetParent();
-	// wParam 低位：是否自动关闭套接字；其余位：命令号 5
-	pParent->SendMessage(WM_SEND_PACKET, 5 << 1 | 1, (LPARAM)&event);
+	CClientController::getInstance()->SendCommandPacket(
+		GetSafeHwnd(), 5, true, (BYTE*)&event, sizeof(event));
+}
+
+LRESULT CWatchDialog::OnSendPackAck(WPARAM wParam, LPARAM lParam)
+{
+	if (lParam == -1 || lParam == -2 || lParam == 1)
+	{
+		SetImageStatus(false);
+		return 0;
+	}
+	if (wParam == NULL)
+	{
+		SetImageStatus(false);
+		return 0;
+	}
+	CPacket* pPacket = (CPacket*)wParam;
+	CPacket head = *pPacket;
+	delete pPacket;
+	if (head.sCmd == 6)
+	{
+		HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, head.strData.size());
+		if (hMem != NULL)
+		{
+			IStream* pStream = NULL;
+			if (CreateStreamOnHGlobal(hMem, TRUE, &pStream) == S_OK)
+			{
+				ULONG length = 0;
+				pStream->Write(head.strData.c_str(), (ULONG)head.strData.size(), &length);
+				LARGE_INTEGER bg = { 0 };
+				pStream->Seek(bg, STREAM_SEEK_SET, NULL);
+				if (!m_image.IsNull())
+					m_image.Destroy();
+				if (SUCCEEDED(m_image.Load(pStream)))
+				{
+					// 和坐标换算用同一块客户区，点在图上的位置才和发出去的坐标一致
+					CRect rect;
+					m_picture.GetClientRect(&rect);
+					m_nObjWidth = m_image.GetWidth();
+					m_nObjHeight = m_image.GetHeight();
+					CDC* pDC = m_picture.GetDC();
+					if (pDC != NULL)
+					{
+						m_image.StretchBlt(pDC->GetSafeHdc(), 0, 0, rect.Width(), rect.Height(), SRCCOPY);
+						m_picture.ReleaseDC(pDC);
+					}
+					// 不要 Invalidate。SS_BLACKFRAME 重画时会先擦背景，刚贴上的图会被抹掉
+					m_image.Destroy();
+				}
+				pStream->Release();
+			}
+			else
+			{
+				GlobalFree(hMem);
+			}
+		}
+	}
+	SetImageStatus(false);
+	return 0;
 }
 
 BOOL CWatchDialog::OnInitDialog()
 {
 	CDialogEx::OnInitDialog();
 
-	SetTimer(0, 11, NULL);
+	m_isFull = false;
 	return TRUE;
 }
 
@@ -156,23 +219,22 @@ void CWatchDialog::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == 0)
 	{
-		CRemoteClientDlg* pParent = (CRemoteClientDlg*)GetParent();
-		if (pParent->isFull())
+		if (isFull())
 		{
 			CRect rect;
 			m_picture.GetWindowRect(rect);
 			if (m_nObjWidth == -1)
 			{
-				m_nObjWidth = pParent->getImage().GetWidth();
+				m_nObjWidth = getImage().GetWidth();
 			}
 			if (m_nObjHeight == -1)
 			{
-				m_nObjHeight = pParent->getImage().GetHeight();
+				m_nObjHeight = getImage().GetHeight();
 			}
-			pParent->getImage().StretchBlt(m_picture.GetDC()->GetSafeHdc(), 0, 0, rect.Width(), rect.Height(), SRCCOPY);
+			getImage().StretchBlt(m_picture.GetDC()->GetSafeHdc(), 0, 0, rect.Width(), rect.Height(), SRCCOPY);
 			m_picture.InvalidateRect(NULL);
-			pParent->getImage().Destroy();
-			pParent->SetImageStatus();
+			getImage().Destroy();
+			SetImageStatus();
 		}
 	}
 	CDialogEx::OnTimer(nIDEvent);
@@ -245,12 +307,10 @@ void CWatchDialog::OnOK()
 
 void CWatchDialog::OnBnClickedBtnLock()
 {
-	CRemoteClientDlg* pParent = (CRemoteClientDlg*)GetParent();
-	pParent->SendMessage(WM_SEND_PACKET, 7 << 1 | 1);
+	CClientController::getInstance()->SendCommandPacket(GetSafeHwnd(), 7, true);
 }
 
 void CWatchDialog::OnBnClickedBtnUnlock()
 {
-	CRemoteClientDlg* pParent = (CRemoteClientDlg*)GetParent();
-	pParent->SendMessage(WM_SEND_PACKET, 8 << 1 | 1);
+	CClientController::getInstance()->SendCommandPacket(GetSafeHwnd(), 8, true);
 }
